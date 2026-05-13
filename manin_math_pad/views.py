@@ -5,6 +5,7 @@ import logging
 
 from django.http import FileResponse, JsonResponse
 from django.views import View
+from django.views.decorators.csrf import csrf_exempt
 
 from .models import Animation, Message, Session, ZettelCluster
 from .engine.scene_generator import SceneGenerator
@@ -13,6 +14,7 @@ from .engine.zettel_generator import ZettelGenerator
 logger = logging.getLogger(__name__)
 
 
+@csrf_exempt
 class SessionView(View):
     """Create or retrieve a chat session."""
 
@@ -46,6 +48,7 @@ class SessionView(View):
         }, status=201)
 
 
+@csrf_exempt
 class ChatView(View):
     """Send a message and receive a response."""
 
@@ -162,6 +165,7 @@ class ChatView(View):
         return JsonResponse(response_data)
 
 
+@csrf_exempt
 class AnimateView(View):
     """Generate a Manim animation for a concept."""
 
@@ -200,6 +204,7 @@ class AnimateView(View):
         }, status=201)
 
 
+@csrf_exempt
 class AnimationStatusView(View):
     """Check animation status or download result."""
 
@@ -236,6 +241,7 @@ class AnimationStatusView(View):
         return JsonResponse(data)
 
 
+@csrf_exempt
 class ZettelView(View):
     """Generate an Obsidian zettel cluster."""
 
@@ -292,6 +298,7 @@ class ZettelView(View):
         }, status=201)
 
 
+@csrf_exempt
 class ZettelStatusView(View):
     """Get zettel cluster details or download as zip."""
 
