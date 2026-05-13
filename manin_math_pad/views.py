@@ -5,6 +5,7 @@ import logging
 
 from django.http import FileResponse, JsonResponse
 from django.views import View
+from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import Animation, Message, Session, ZettelCluster
@@ -14,7 +15,7 @@ from .engine.zettel_generator import ZettelGenerator
 logger = logging.getLogger(__name__)
 
 
-@csrf_exempt
+@method_decorator(csrf_exempt, name='dispatch')
 class SessionView(View):
     """Create or retrieve a chat session."""
 
@@ -48,7 +49,7 @@ class SessionView(View):
         }, status=201)
 
 
-@csrf_exempt
+@method_decorator(csrf_exempt, name='dispatch')
 class ChatView(View):
     """Send a message and receive a response."""
 
@@ -165,7 +166,7 @@ class ChatView(View):
         return JsonResponse(response_data)
 
 
-@csrf_exempt
+@method_decorator(csrf_exempt, name='dispatch')
 class AnimateView(View):
     """Generate a Manim animation for a concept."""
 
@@ -204,7 +205,7 @@ class AnimateView(View):
         }, status=201)
 
 
-@csrf_exempt
+@method_decorator(csrf_exempt, name='dispatch')
 class AnimationStatusView(View):
     """Check animation status or download result."""
 
@@ -241,7 +242,7 @@ class AnimationStatusView(View):
         return JsonResponse(data)
 
 
-@csrf_exempt
+@method_decorator(csrf_exempt, name='dispatch')
 class ZettelView(View):
     """Generate an Obsidian zettel cluster."""
 
@@ -298,7 +299,7 @@ class ZettelView(View):
         }, status=201)
 
 
-@csrf_exempt
+@method_decorator(csrf_exempt, name='dispatch')
 class ZettelStatusView(View):
     """Get zettel cluster details or download as zip."""
 
