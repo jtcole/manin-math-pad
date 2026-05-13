@@ -97,7 +97,7 @@ class ChatView(View):
         # Generate zettel cluster if requested
         zettel = None
         if wants_zettel:
-            cluster = zettel_gen.generate(content, context=session.context)
+            cluster = zettel_gen.generate(content, session_context=session.context)
             zettel = ZettelCluster.objects.create(
                 session=session,
                 topic=cluster.topic,
@@ -262,7 +262,7 @@ class ZettelView(View):
             return JsonResponse({'error': 'Session not found'}, status=404)
 
         zettel_gen = ZettelGenerator()
-        cluster = zettel_gen.generate(topic, context=session.context)
+        cluster = zettel_gen.generate(topic, session_context=session.context)
 
         zettel = ZettelCluster.objects.create(
             session=session,
