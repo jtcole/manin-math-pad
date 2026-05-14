@@ -12,23 +12,39 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional
 
 
 # ─── Zettel cluster templates by domain ──────────────────────────────────────
 
 ZETTEL_TEMPLATES: dict[str, dict] = {
     'calculus': {
-        'central_fields': ['Definition', 'Intuition', 'Key Formula', 'Common Mistakes', 'Related Concepts'],
+        'central_fields': [
+            'Definition',
+            'Intuition',
+            'Key Formula',
+            'Common Mistakes',
+            'Related Concepts',
+        ],
         'link_types': ['generalizes', 'specializes', 'uses', 'proves', 'contrasts'],
     },
     'linear_algebra': {
-        'central_fields': ['Definition', 'Geometric Intuition', 'Matrix Form', 'Properties', 'Applications'],
+        'central_fields': [
+            'Definition',
+            'Geometric Intuition',
+            'Matrix Form',
+            'Properties',
+            'Applications',
+        ],
         'link_types': ['generalizes', 'decomposes', 'transforms', 'dual', 'eigen'],
     },
     'complex_analysis': {
-        'central_fields': ['Definition', 'Geometric Interpretation', 'Key Theorem', 'Visualization', 'Applications'],
+        'central_fields': [
+            'Definition',
+            'Geometric Interpretation',
+            'Key Theorem',
+            'Visualization',
+            'Applications',
+        ],
         'link_types': ['maps', 'preserves', 'conforms', 'extends', 'residue'],
     },
     'topology': {
@@ -40,11 +56,23 @@ ZETTEL_TEMPLATES: dict[str, dict] = {
         'link_types': ['implies', 'generalizes', 'conjectures', 'proves', 'extends'],
     },
     'probability': {
-        'central_fields': ['Definition', 'Intuition', 'Formula', 'Conditions', 'Related Distributions'],
+        'central_fields': [
+            'Definition',
+            'Intuition',
+            'Formula',
+            'Conditions',
+            'Related Distributions',
+        ],
         'link_types': ['generalizes', 'approximates', 'converges', 'conditions_on', 'marginalizes'],
     },
     'geometry': {
-        'central_fields': ['Definition', 'Construction', 'Properties', 'Theorems', 'Real-world Examples'],
+        'central_fields': [
+            'Definition',
+            'Construction',
+            'Properties',
+            'Theorems',
+            'Real-world Examples',
+        ],
         'link_types': ['generalizes', 'dual', 'projects', 'inscribes', 'tessellates'],
     },
     'algebra': {
@@ -102,12 +130,40 @@ class ZettelGenerator:
         lowered = concept.lower()
 
         domain_keywords = {
-            'calculus': ['derivative', 'integral', 'limit', 'series', 'taylor', 'fourier', 'differentiation', 'epsilon', 'continuity'],
-            'linear_algebra': ['matrix', 'vector', 'eigenvalue', 'eigenvector', 'determinant', 'linear', 'basis', 'span', 'rank'],
+            'calculus': [
+                'derivative',
+                'integral',
+                'limit',
+                'series',
+                'taylor',
+                'fourier',
+                'differentiation',
+                'epsilon',
+                'continuity',
+            ],
+            'linear_algebra': [
+                'matrix',
+                'vector',
+                'eigenvalue',
+                'eigenvector',
+                'determinant',
+                'linear',
+                'basis',
+                'span',
+                'rank',
+            ],
             'complex_analysis': ['complex', 'imaginary', 'euler', 'polar', 'conformal', 'residue'],
             'topology': ['topology', 'manifold', 'homotopy', 'homology', 'knot', 'morse'],
             'number_theory': ['prime', 'modular', 'congruence', 'fermat', 'riemann', 'goldbach'],
-            'probability': ['probability', 'distribution', 'bayes', 'random', 'expectation', 'variance', 'gaussian'],
+            'probability': [
+                'probability',
+                'distribution',
+                'bayes',
+                'random',
+                'expectation',
+                'variance',
+                'gaussian',
+            ],
             'geometry': ['circle', 'triangle', 'polygon', 'conic', 'ellipse', 'pythagorean'],
             'algebra': ['group', 'ring', 'field', 'isomorphism', 'homomorphism', 'galois'],
         }
@@ -161,7 +217,10 @@ class ZettelGenerator:
                 prev_slug = self._slugify(prev_concept)
                 connection = ZettelNote(
                     title=f'{concept} ↔ {prev_concept}',
-                    filename=f'zettel_{self.timestamp}_{concept.lower().replace(" ", "-")}-connects-{prev_slug}',
+                    filename=(
+                        f'zettel_{self.timestamp}_'
+                        f'{concept.lower().replace(" ", "-")}-connects-{prev_slug}'
+                    ),
                     content=self._connection_content(concept, prev_concept, domain),
                     tags=[domain, 'connection', 'zettel'],
                     links=[central.filename, f'zettel_{prev_slug}'],

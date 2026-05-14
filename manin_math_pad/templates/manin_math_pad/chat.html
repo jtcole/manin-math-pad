@@ -1,0 +1,714 @@
+{% extends "manin_math_pad/base.html" %}
+
+{% block title %}Manin Math Pad Chat{% endblock %}
+
+{% block styles %}
+  .app-shell {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    min-height: 100vh;
+  }
+
+  .sidebar {
+    display: flex;
+    min-height: 100vh;
+    flex-direction: column;
+    border-right: 1px solid var(--line);
+    background: #fbfcfd;
+  }
+
+  .sidebar-header,
+  .composer {
+    padding: 16px;
+  }
+
+  .sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .brand {
+    min-width: 0;
+  }
+
+  .brand h1 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  .brand span {
+    display: block;
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .icon-button {
+    display: inline-grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    flex: 0 0 auto;
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .session-list {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    padding: 10px;
+  }
+
+  .session-button {
+    width: 100%;
+    padding: 10px;
+    text-align: left;
+  }
+
+  .session-button.is-active {
+    border-color: var(--accent);
+    background: var(--soft);
+  }
+
+  .session-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 650;
+  }
+
+  .session-meta {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .chat-pane {
+    display: grid;
+    min-width: 0;
+    min-height: 100vh;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .topbar {
+    display: flex;
+    min-height: 69px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    padding: 14px 20px;
+  }
+
+  .topbar h2 {
+    margin: 0;
+    font-size: 18px;
+  }
+
+  .status-pill {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 12px;
+    padding: 5px 10px;
+    white-space: nowrap;
+  }
+
+  .message-stream {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 14px;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .empty-state {
+    align-self: center;
+    color: var(--muted);
+    margin-top: 18vh;
+  }
+
+  .message {
+    max-width: min(760px, 100%);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    white-space: pre-wrap;
+    line-height: 1.5;
+  }
+
+  .message.user {
+    align-self: flex-end;
+    background: var(--user);
+  }
+
+  .message.assistant {
+    align-self: flex-start;
+    background: var(--assistant);
+  }
+
+  .artifact {
+    width: min(760px, 100%);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 12px;
+  }
+
+  .artifact-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .artifact-title {
+    overflow-wrap: anywhere;
+    font-weight: 700;
+  }
+
+  .artifact video {
+    display: block;
+    width: 100%;
+    max-height: 420px;
+    border-radius: 6px;
+    background: #101828;
+  }
+
+  .progress-line {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #eef1f4;
+  }
+
+  .progress-line::before {
+    display: block;
+    width: 45%;
+    height: 100%;
+    animation: loading 1.3s ease-in-out infinite;
+    background: var(--accent);
+    content: "";
+  }
+
+  @keyframes loading {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(240%);
+    }
+  }
+
+  details.zettel-tree {
+    width: min(760px, 100%);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 12px;
+  }
+
+  details.zettel-tree summary {
+    cursor: pointer;
+    font-weight: 700;
+  }
+
+  .note-tree {
+    display: grid;
+    gap: 8px;
+    margin: 12px 0 0;
+    padding-left: 18px;
+  }
+
+  .note-tree li {
+    padding-left: 4px;
+  }
+
+  .note-meta {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 2px;
+  }
+
+  .composer {
+    display: grid;
+    gap: 10px;
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+  }
+
+  .input-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 54px;
+    max-height: 160px;
+    resize: vertical;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px;
+  }
+
+  .send-button {
+    min-width: 96px;
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #ffffff;
+    font-weight: 700;
+  }
+
+  .send-button:hover {
+    border-color: var(--accent-strong);
+    background: var(--accent-strong);
+  }
+
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .toggle-button {
+    padding: 8px 12px;
+  }
+
+  .toggle-button[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--soft);
+    color: var(--accent-strong);
+    font-weight: 700;
+  }
+
+  .error-line {
+    color: var(--warn);
+    font-size: 13px;
+    min-height: 18px;
+  }
+
+  @media (max-width: 760px) {
+    .app-shell {
+      grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+      min-height: auto;
+      max-height: 230px;
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .chat-pane {
+      min-height: calc(100vh - 230px);
+    }
+
+    .input-row {
+      grid-template-columns: 1fr;
+    }
+
+    .send-button {
+      min-height: 44px;
+    }
+  }
+{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="brand">
+        <h1>Manin Math Pad</h1>
+        <span id="sessionCount">0 sessions</span>
+      </div>
+      <button class="icon-button" id="newSessionButton" type="button" title="New session">+</button>
+    </div>
+    <div class="session-list" id="sessionList"></div>
+  </aside>
+
+  <main class="chat-pane">
+    <header class="topbar">
+      <h2 id="activeTitle">Session</h2>
+      <span class="status-pill" id="queueStatus">Ready</span>
+    </header>
+
+    <section class="message-stream" id="messageStream" aria-live="polite"></section>
+
+    <form class="composer" id="composer">
+      <div class="toolbar">
+        <button class="toggle-button" id="animateToggle" type="button" aria-pressed="true">
+          Animate
+        </button>
+        <button class="toggle-button" id="zettelToggle" type="button" aria-pressed="false">
+          Zettel
+        </button>
+      </div>
+      <div class="input-row">
+        <textarea id="messageInput" name="message" placeholder="Describe a math concept"></textarea>
+        <button class="send-button" id="sendButton" type="submit">Send</button>
+      </div>
+      <div class="error-line" id="errorLine"></div>
+    </form>
+  </main>
+</div>
+
+<script>
+  const API_BASE = "{{ api_base|escapejs }}";
+  const state = {
+    sessions: [],
+    currentSession: null,
+    animate: true,
+    zettel: false,
+    polls: new Map(),
+  };
+
+  const sessionList = document.getElementById("sessionList");
+  const sessionCount = document.getElementById("sessionCount");
+  const messageStream = document.getElementById("messageStream");
+  const activeTitle = document.getElementById("activeTitle");
+  const queueStatus = document.getElementById("queueStatus");
+  const errorLine = document.getElementById("errorLine");
+  const messageInput = document.getElementById("messageInput");
+  const sendButton = document.getElementById("sendButton");
+  const animateToggle = document.getElementById("animateToggle");
+  const zettelToggle = document.getElementById("zettelToggle");
+
+  function apiPath(path) {
+    return `${API_BASE}${path}`;
+  }
+
+  async function api(path, options = {}) {
+    const headers = Object.assign({"Content-Type": "application/json"}, options.headers || {});
+    const response = await fetch(apiPath(path), Object.assign({}, options, {headers}));
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || `Request failed: ${response.status}`);
+    }
+    return payload;
+  }
+
+  function setError(message) {
+    errorLine.textContent = message || "";
+  }
+
+  function formatTime(value) {
+    if (!value) {
+      return "";
+    }
+    return new Date(value).toLocaleString([], {dateStyle: "short", timeStyle: "short"});
+  }
+
+  function sessionTitle(session) {
+    return session.title || "Untitled session";
+  }
+
+  async function loadSessions(selectLatest = false) {
+    const data = await api("session/");
+    state.sessions = data.sessions || [];
+    sessionCount.textContent = `${state.sessions.length} session${state.sessions.length === 1 ? "" : "s"}`;
+    renderSessionList();
+
+    if (!state.sessions.length) {
+      await createSession();
+      return;
+    }
+
+    if (selectLatest || !state.currentSession) {
+      await loadSession(state.sessions[0].uid);
+    }
+  }
+
+  function renderSessionList() {
+    sessionList.innerHTML = "";
+    state.sessions.forEach((session) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "session-button";
+      if (state.currentSession && state.currentSession.uid === session.uid) {
+        button.classList.add("is-active");
+      }
+      button.innerHTML = `
+        <div class="session-title"></div>
+        <div class="session-meta"></div>
+      `;
+      button.querySelector(".session-title").textContent = sessionTitle(session);
+      button.querySelector(".session-meta").textContent =
+        `${session.message_count} messages - ${formatTime(session.updated_at)}`;
+      button.addEventListener("click", () => loadSession(session.uid));
+      sessionList.appendChild(button);
+    });
+  }
+
+  async function createSession() {
+    const data = await api("session/", {
+      method: "POST",
+      body: JSON.stringify({title: "New session"}),
+    });
+    await loadSessions(false);
+    await loadSession(data.uid);
+  }
+
+  async function loadSession(uid) {
+    const data = await api(`session/${uid}/`);
+    state.currentSession = data;
+    activeTitle.textContent = sessionTitle(data);
+    renderSessionList();
+    renderMessages();
+    renderArtifacts();
+    scrollToBottom();
+  }
+
+  function renderMessages() {
+    messageStream.innerHTML = "";
+    const messages = (state.currentSession && state.currentSession.messages) || [];
+    if (!messages.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "Start with a concept.";
+      messageStream.appendChild(empty);
+      return;
+    }
+
+    messages.forEach((message) => appendMessage(message.role, message.content));
+  }
+
+  function appendMessage(role, content) {
+    const node = document.createElement("div");
+    node.className = `message ${role}`;
+    node.textContent = content;
+    messageStream.appendChild(node);
+    return node;
+  }
+
+  function renderArtifacts() {
+    if (!state.currentSession) {
+      return;
+    }
+
+    (state.currentSession.animations || []).forEach((animation) => {
+      renderAnimation(animation);
+      if (["pending", "generating", "rendering"].includes(animation.status)) {
+        pollAnimation(animation.uid);
+      }
+    });
+
+    (state.currentSession.zettel_clusters || []).forEach((cluster) => {
+      renderZettel(cluster);
+    });
+  }
+
+  function renderAnimation(animation) {
+    const existing = document.querySelector(`[data-animation-uid="${animation.uid}"]`);
+    const card = existing || document.createElement("article");
+    card.className = "artifact";
+    card.dataset.animationUid = animation.uid;
+
+    const downloadUrl = apiPath(`animate/${animation.uid}/?download=1`);
+    const status = animation.status || "pending";
+    const viewer = animation.video_url
+      ? `<video controls src="${animation.video_url}" ${animation.thumbnail_url ? `poster="${animation.thumbnail_url}"` : ""}></video>`
+      : `<div class="progress-line" aria-label="Rendering"></div>`;
+    const action = status === "completed"
+      ? `<a href="${downloadUrl}">Download</a>`
+      : `<span class="status-pill">${status}</span>`;
+
+    card.innerHTML = `
+      <div class="artifact-header">
+        <div class="artifact-title"></div>
+        ${action}
+      </div>
+      ${viewer}
+    `;
+    card.querySelector(".artifact-title").textContent = animation.concept;
+
+    if (!existing) {
+      messageStream.appendChild(card);
+    }
+  }
+
+  function renderZettel(cluster) {
+    const existing = document.querySelector(`[data-zettel-uid="${cluster.uid}"]`);
+    const details = existing || document.createElement("details");
+    details.className = "zettel-tree";
+    details.open = true;
+    details.dataset.zettelUid = cluster.uid;
+
+    const notes = cluster.notes || [];
+    details.innerHTML = `
+      <summary></summary>
+      <ol class="note-tree"></ol>
+    `;
+    details.querySelector("summary").textContent =
+      `${cluster.topic} - ${notes.length || cluster.note_count || 0} notes`;
+
+    const list = details.querySelector(".note-tree");
+    notes.forEach((note) => {
+      const item = document.createElement("li");
+      const title = document.createElement("strong");
+      const meta = document.createElement("span");
+      title.textContent = note.title || note.filename;
+      meta.className = "note-meta";
+      meta.textContent = [note.filename, (note.tags || []).join(", ")].filter(Boolean).join(" - ");
+      item.appendChild(title);
+      item.appendChild(meta);
+      list.appendChild(item);
+    });
+
+    if (!existing) {
+      messageStream.appendChild(details);
+    }
+  }
+
+  async function pollAnimation(uid) {
+    if (state.polls.has(uid)) {
+      return;
+    }
+
+    const interval = window.setInterval(async () => {
+      try {
+        const animation = await api(`animate/${uid}/`);
+        mergeAnimation(animation);
+        renderAnimation(animation);
+        queueStatus.textContent = animation.status;
+        if (["completed", "failed"].includes(animation.status)) {
+          window.clearInterval(interval);
+          state.polls.delete(uid);
+        }
+      } catch (error) {
+        window.clearInterval(interval);
+        state.polls.delete(uid);
+        setError(error.message);
+      }
+    }, 3000);
+
+    state.polls.set(uid, interval);
+  }
+
+  function mergeAnimation(animation) {
+    if (!state.currentSession) {
+      return;
+    }
+    const animations = state.currentSession.animations || [];
+    const index = animations.findIndex((item) => item.uid === animation.uid);
+    if (index >= 0) {
+      animations[index] = animation;
+    } else {
+      animations.push(animation);
+    }
+    state.currentSession.animations = animations;
+  }
+
+  function mergeZettel(cluster) {
+    if (!state.currentSession) {
+      return;
+    }
+    const clusters = state.currentSession.zettel_clusters || [];
+    const index = clusters.findIndex((item) => item.uid === cluster.uid);
+    if (index >= 0) {
+      clusters[index] = cluster;
+    } else {
+      clusters.push(cluster);
+    }
+    state.currentSession.zettel_clusters = clusters;
+  }
+
+  async function fetchZettel(uid) {
+    const cluster = await api(`zettel/${uid}/`);
+    mergeZettel(cluster);
+    renderZettel(cluster);
+  }
+
+  function scrollToBottom() {
+    messageStream.scrollTop = messageStream.scrollHeight;
+  }
+
+  function updateToggles() {
+    animateToggle.setAttribute("aria-pressed", String(state.animate));
+    zettelToggle.setAttribute("aria-pressed", String(state.zettel));
+  }
+
+  document.getElementById("newSessionButton").addEventListener("click", () => {
+    createSession().catch((error) => setError(error.message));
+  });
+
+  animateToggle.addEventListener("click", () => {
+    state.animate = !state.animate;
+    updateToggles();
+  });
+
+  zettelToggle.addEventListener("click", () => {
+    state.zettel = !state.zettel;
+    updateToggles();
+  });
+
+  document.getElementById("composer").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setError("");
+
+    const message = messageInput.value.trim();
+    if (!message) {
+      return;
+    }
+
+    if (!state.currentSession) {
+      await createSession();
+    }
+
+    sendButton.disabled = true;
+    queueStatus.textContent = "Sending";
+    appendMessage("user", message);
+    const pending = appendMessage("assistant", "...");
+    messageInput.value = "";
+    scrollToBottom();
+
+    try {
+      const data = await api("chat/", {
+        method: "POST",
+        body: JSON.stringify({
+          session_uid: state.currentSession.uid,
+          message,
+          animate: state.animate,
+          zettel: state.zettel,
+        }),
+      });
+
+      pending.textContent = data.message || "";
+      if (data.animation) {
+        mergeAnimation(data.animation);
+        renderAnimation(data.animation);
+        pollAnimation(data.animation.uid);
+      }
+      if (data.zettel) {
+        await fetchZettel(data.zettel.uid);
+      }
+      queueStatus.textContent = "Ready";
+      await loadSessions(false);
+      await loadSession(state.currentSession.uid);
+    } catch (error) {
+      pending.textContent = "Request failed.";
+      queueStatus.textContent = "Error";
+      setError(error.message);
+    } finally {
+      sendButton.disabled = false;
+      messageInput.focus();
+      scrollToBottom();
+    }
+  });
+
+  updateToggles();
+  loadSessions(true).catch((error) => setError(error.message));
+</script>
+{% endblock %}

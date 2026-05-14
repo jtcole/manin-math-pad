@@ -6,14 +6,12 @@ Runs as a subprocess to isolate rendering failures.
 """
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
 import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +46,7 @@ class ManimRenderer:
         """
         Args:
             output_dir: Directory for rendered output. Defaults to MEDIA_ROOT/manin/
-            quality: Manim quality preset (low_quality, medium_quality, high_quality, production_quality)
+            quality: Manim quality preset.
             format: Output format (mp4, gif)
             fps: Frames per second
             manim_cmd: Path to manim executable
@@ -134,7 +132,12 @@ class ManimRenderer:
 
             if not video_files:
                 # Try broader search
-                video_files = list((tmpdir_path / 'media').rglob(f'*.{self.format}')) if (tmpdir_path / 'media').exists() else []
+                root_media_dir = tmpdir_path / 'media'
+                video_files = (
+                    list(root_media_dir.rglob(f'*.{self.format}'))
+                    if root_media_dir.exists()
+                    else []
+                )
 
             if not video_files:
                 return RenderResult(
@@ -145,11 +148,17 @@ class ManimRenderer:
             source_video = video_files[0]
 
             # Move to output directory if specified
+            thumbnail_path = None
             if self.output_dir:
                 self.output_dir.mkdir(parents=True, exist_ok=True)
                 dest_video = self.output_dir / f'{job_uid}.{self.format}'
                 dest_video.write_bytes(source_video.read_bytes())
                 final_path = dest_video
+
+                thumbnail_path = self._create_thumbnail(
+                    final_path,
+                    self.output_dir / f'{job_uid}.jpg',
+                )
             else:
                 final_path = source_video
 
@@ -158,6 +167,7 @@ class ManimRenderer:
             return RenderResult(
                 success=True,
                 video_path=final_path,
+                thumbnail_path=thumbnail_path,
                 duration_seconds=None,  # TODO: probe with ffprobe
                 metadata={
                     'scene_name': scene_name,
@@ -167,3 +177,35 @@ class ManimRenderer:
                     'file_size_bytes': final_path.stat().st_size if final_path.exists() else 0,
                 },
             )
+
+    def _create_thumbnail(self, video_path: Path, thumbnail_path: Path) -> Path | None:
+        """Extract a still frame with ffmpeg when available."""
+        cmd = [
+            'ffmpeg',
+            '-y',
+            '-loglevel',
+            'error',
+            '-ss',
+            '00:00:01',
+            '-i',
+            str(video_path),
+            '-frames:v',
+            '1',
+            str(thumbnail_path),
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            logger.warning('Could not create thumbnail for %s: %s', video_path, exc)
+            return None
+
+        if result.returncode != 0 or not thumbnail_path.exists():
+            logger.warning(
+                'Could not create thumbnail for %s: %s',
+                video_path,
+                (result.stderr or result.stdout or f'exit code {result.returncode}')[:500],
+            )
+            return None
+
+        return thumbnail_path

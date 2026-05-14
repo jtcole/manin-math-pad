@@ -14,10 +14,35 @@ Each generated scene follows the Manim Community pattern:
 """
 from __future__ import annotations
 
+import ast
+import json
+import logging
+import os
 import re
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional
+from typing import ClassVar
+
+logger = logging.getLogger(__name__)
+
+
+def _env_or_setting(name: str, default: str | None = None) -> str | None:
+    """Read config from the environment, then optional Django settings."""
+    value = os.environ.get(name)
+    if value:
+        return value
+
+    try:
+        from django.conf import settings
+
+        if settings.configured:
+            setting_value = getattr(settings, name, default)
+            return str(setting_value) if setting_value else default
+    except Exception:
+        return default
+
+    return default
 
 
 # ─── Scene templates organized by domain ────────────────────────────────────
@@ -57,7 +82,8 @@ class EulersIdentity(Scene):
         )
         label = always_redraw(
             lambda: Tex(
-                f"({{2 * np.cos(angle_tracker.get_value()):.2f}}, {{2 * np.sin(angle_tracker.get_value()):.2f}})",
+                f"({{2 * np.cos(angle_tracker.get_value()):.2f}}, "
+                f"{{2 * np.sin(angle_tracker.get_value()):.2f}})",
                 font_size=36
             ).next_to(dot, UR, buff=0.2)
         )
@@ -225,14 +251,83 @@ class FourierSeriesSquare(Scene):
 # ─── Concept → domain mapping ────────────────────────────────────────────────
 
 CONCEPT_DOMAINS: dict[str, list[str]] = {
-    'calculus': ['derivative', 'integral', 'limit', 'series', 'taylor', 'fourier', 'differentiation', 'integration', 'continuity', 'epsilon'],
-    'linear_algebra': ['matrix', 'vector', 'eigenvalue', 'eigenvector', 'determinant', 'linear transformation', 'basis', 'span', 'null space', 'rank'],
-    'complex_analysis': ['euler', 'complex', 'imaginary', 'polar', 'conformal', 'residue', 'cauchy'],
+    'calculus': [
+        'derivative',
+        'integral',
+        'limit',
+        'series',
+        'taylor',
+        'fourier',
+        'differentiation',
+        'integration',
+        'continuity',
+        'epsilon',
+    ],
+    'linear_algebra': [
+        'matrix',
+        'vector',
+        'eigenvalue',
+        'eigenvector',
+        'determinant',
+        'linear transformation',
+        'basis',
+        'span',
+        'null space',
+        'rank',
+    ],
+    'complex_analysis': [
+        'euler',
+        'complex',
+        'imaginary',
+        'polar',
+        'conformal',
+        'residue',
+        'cauchy',
+    ],
     'topology': ['topology', 'manifold', 'homotopy', 'homology', 'knot', 'morse', 'borsuk'],
-    'number_theory': ['prime', 'modular', 'congruence', 'fermat', 'riemann zeta', 'goldbach', 'twin prime'],
-    'probability': ['probability', 'distribution', 'bayes', 'random', 'expectation', 'variance', 'markov', 'poisson', 'gaussian', 'central limit'],
-    'geometry': ['circle', 'triangle', 'polygon', 'conic', 'ellipse', 'hyperbola', 'pythagorean', 'euclidean', 'non-euclidean'],
-    'algebra': ['group', 'ring', 'field', 'isomorphism', 'homomorphism', 'abelian', 'galois', 'polynomial', 'abstract algebra'],
+    'number_theory': [
+        'prime',
+        'modular',
+        'congruence',
+        'fermat',
+        'riemann zeta',
+        'goldbach',
+        'twin prime',
+    ],
+    'probability': [
+        'probability',
+        'distribution',
+        'bayes',
+        'random',
+        'expectation',
+        'variance',
+        'markov',
+        'poisson',
+        'gaussian',
+        'central limit',
+    ],
+    'geometry': [
+        'circle',
+        'triangle',
+        'polygon',
+        'conic',
+        'ellipse',
+        'hyperbola',
+        'pythagorean',
+        'euclidean',
+        'non-euclidean',
+    ],
+    'algebra': [
+        'group',
+        'ring',
+        'field',
+        'isomorphism',
+        'homomorphism',
+        'abelian',
+        'galois',
+        'polynomial',
+        'abstract algebra',
+    ],
 }
 
 # ─── Scene generator ─────────────────────────────────────────────────────────
@@ -245,8 +340,341 @@ class GeneratedScene:
     scene_code: str
     base_class: str = 'Scene'
     description: str = ''
-    source: str = 'template'  # 'template' or 'llm'
+    source: str = 'template'  # 'template', 'llm', or 'placeholder'
     metadata: dict = field(default_factory=dict)
+
+
+def _scene_name_from_concept(concept: str) -> str:
+    """Create a safe Manim scene class name from free-form text."""
+    scene_name = re.sub(r'[^a-zA-Z0-9]', '', concept.title())[:40] or 'CustomScene'
+    if not scene_name.endswith('Scene'):
+        scene_name += 'Scene'
+    if scene_name[0].isdigit():
+        scene_name = f'Concept{scene_name}'
+    return scene_name
+
+
+def _build_placeholder_scene(concept: str, scene_name: str, domain: str) -> str:
+    """Generate a minimal, valid Manim scene for graceful degradation."""
+    concept_literal = repr(concept)
+    domain_literal = repr(domain)
+    return f'''
+from manim import *
+
+class {scene_name}(Scene):
+    """Fallback Manim scene."""
+    def construct(self):
+        concept = {concept_literal}
+        domain = {domain_literal}
+
+        title = Tex(concept, font_size=48)
+        title.to_edge(UP)
+        self.play(Write(title))
+        self.wait(1)
+
+        placeholder = Tex(f"Animation placeholder: {{domain}}", font_size=36, color=GREY)
+        placeholder.move_to(ORIGIN)
+        self.play(FadeIn(placeholder))
+        self.wait(2)
+'''
+
+
+@dataclass
+class LLMSceneGenerator:
+    """Generate Manim scene code with an LLM and validate the result.
+
+    Provider selection intentionally mirrors the app runtime:
+      - OpenAI when OPENAI_API_KEY is configured
+      - Ollama otherwise
+
+    Every public generation path falls back to a placeholder scene. Callers
+    should never need to catch provider or validation errors to get valid code.
+    """
+
+    model: str | None = None
+    timeout: int = 30
+    temperature: float = 0.2
+    provider: str = field(init=False)
+
+    DEFAULT_OPENAI_MODEL: ClassVar[str] = 'gpt-4o-mini'
+    DEFAULT_OLLAMA_MODEL: ClassVar[str] = 'deepseek-v4-pro'
+
+    MANIM_KNOWLEDGE: ClassVar[str] = """
+Available Manim knowledge:
+- Use a Scene class with a construct(self) method.
+- Common objects: Circle, Square, Axes, Tex, MathTex, Matrix, VGroup, Dot, Arrow,
+  Line, NumberPlane, DecimalNumber, Brace, SurroundingRectangle.
+- Common animations: Write, Create, FadeIn, FadeOut, Transform, ReplacementTransform,
+  MoveToTarget, GrowArrow, Indicate, Circumscribe.
+- Use ValueTracker for dynamic animations.
+- Use always_redraw for linked objects that should update with trackers.
+- Use self.play(...) and self.wait(...) to control timing.
+"""
+
+    EXAMPLE_SCENE_TEMPLATE: ClassVar[str] = """
+from manim import *
+
+class ExampleConceptScene(Scene):
+    def construct(self):
+        title = Tex("Example Concept", font_size=48)
+        title.to_edge(UP)
+        self.play(Write(title))
+
+        dot = Dot(color=YELLOW)
+        circle = Circle(radius=2, color=BLUE)
+        self.play(Create(circle), FadeIn(dot))
+        self.play(dot.animate.shift(RIGHT * 2))
+        self.wait(1)
+"""
+
+    def __post_init__(self) -> None:
+        self.provider = self._detect_provider()
+        env_model = _env_or_setting('MANIN_SCENE_MODEL')
+        if not self.model:
+            self.model = env_model or self._default_model()
+
+    def _detect_provider(self) -> str:
+        """Detect the active LLM provider from configured credentials."""
+        if _env_or_setting('OPENAI_API_KEY'):
+            return 'openai'
+        return 'ollama'
+
+    def _default_model(self) -> str:
+        if self.provider == 'openai':
+            return self.DEFAULT_OPENAI_MODEL
+        return self.DEFAULT_OLLAMA_MODEL
+
+    def generate(
+        self,
+        concept: str,
+        context: dict | None = None,
+        scene_name: str | None = None,
+        domain: str = 'general',
+    ) -> GeneratedScene:
+        """Generate and validate scene code, falling back on any failure."""
+        context = context or {}
+        scene_name = scene_name or _scene_name_from_concept(concept)
+
+        try:
+            prompt = self._build_prompt(concept, context, scene_name, domain)
+            response = self._call_llm(prompt)
+            scene_code = self.extract_python_code(response)
+            validation_error = self.validate_scene_code(scene_code)
+            if validation_error:
+                raise ValueError(validation_error)
+
+            parsed_scene_name = self.extract_scene_name(scene_code) or scene_name
+            return GeneratedScene(
+                concept=concept,
+                scene_name=parsed_scene_name,
+                scene_code=scene_code,
+                base_class='Scene',
+                description=f'LLM-generated scene for: {concept}',
+                source='llm',
+                metadata={
+                    'domain': domain,
+                    'provider': self.provider,
+                    'model': self.model,
+                },
+            )
+        except Exception as exc:
+            logger.warning('LLM scene generation failed for %r: %s', concept, exc)
+            return self._placeholder_result(concept, scene_name, domain, str(exc))
+
+    def _placeholder_result(
+        self,
+        concept: str,
+        scene_name: str,
+        domain: str,
+        reason: str,
+    ) -> GeneratedScene:
+        return GeneratedScene(
+            concept=concept,
+            scene_name=scene_name,
+            scene_code=_build_placeholder_scene(concept, scene_name, domain),
+            base_class='Scene',
+            description=f'Fallback scene for: {concept}',
+            source='placeholder',
+            metadata={
+                'domain': domain,
+                'provider': self.provider,
+                'model': self.model,
+                'fallback_reason': reason[:500],
+            },
+        )
+
+    def _build_prompt(
+        self,
+        concept: str,
+        context: dict,
+        scene_name: str,
+        domain: str,
+    ) -> str:
+        context_text = ''
+        if context:
+            context_text = json.dumps(context, default=str)[:1200]
+
+        return f"""
+Generate Manim Community Edition Python code for this math animation.
+
+Concept description:
+{concept}
+
+Mathematical domain:
+{domain}
+
+Session context:
+{context_text or '(none)'}
+
+Required scene class name:
+{scene_name}
+
+{self.MANIM_KNOWLEDGE}
+
+Example scene template:
+```python
+{self.EXAMPLE_SCENE_TEMPLATE.strip()}
+```
+
+Rules:
+- Return one Python code block only.
+- The code must start with `from manim import *`.
+- Define exactly one primary scene class named {scene_name}.
+- The scene must include `def construct(self):`.
+- Keep the animation short and renderable without external assets.
+- Use valid Python and valid Manim Community Edition APIs.
+""".strip()
+
+    def _call_llm(self, prompt: str) -> str:
+        if self.provider == 'openai':
+            return self._call_openai(prompt)
+        return self._call_ollama(prompt)
+
+    def _post_json(
+        self,
+        url: str,
+        payload: dict,
+        headers: dict[str, str] | None = None,
+    ) -> dict:
+        request_headers = {'Content-Type': 'application/json'}
+        if headers:
+            request_headers.update(headers)
+
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode('utf-8'),
+            headers=request_headers,
+            method='POST',
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return json.loads(response.read().decode('utf-8'))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode('utf-8', errors='replace')
+            raise RuntimeError(f'HTTP {exc.code}: {body[:500]}') from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(str(exc.reason)) from exc
+
+    def _call_openai(self, prompt: str) -> str:
+        api_key = _env_or_setting('OPENAI_API_KEY')
+        if not api_key:
+            raise RuntimeError('OPENAI_API_KEY is not configured')
+
+        base_url = _env_or_setting('OPENAI_BASE_URL', 'https://api.openai.com/v1').rstrip('/')
+        data = self._post_json(
+            f'{base_url}/chat/completions',
+            {
+                'model': self.model,
+                'messages': [
+                    {
+                        'role': 'system',
+                        'content': (
+                            'You generate concise, valid Manim Community Edition '
+                            'scene code. Return only a Python code block.'
+                        ),
+                    },
+                    {'role': 'user', 'content': prompt},
+                ],
+                'temperature': self.temperature,
+                'max_tokens': 2200,
+            },
+            headers={'Authorization': f'Bearer {api_key}'},
+        )
+        return data['choices'][0]['message']['content'].strip()
+
+    def _call_ollama(self, prompt: str) -> str:
+        host = _env_or_setting('OLLAMA_HOST', 'http://localhost:11434').rstrip('/')
+        data = self._post_json(
+            f'{host}/api/generate',
+            {
+                'model': self.model,
+                'prompt': prompt,
+                'stream': False,
+                'options': {
+                    'temperature': self.temperature,
+                    'num_predict': 2200,
+                },
+            },
+        )
+        return data.get('response', '').strip()
+
+    @staticmethod
+    def extract_python_code(response: str) -> str:
+        """Extract the first Python code block from an LLM response."""
+        if not response:
+            return ''
+
+        fenced_blocks = re.findall(
+            r'```(?:python|py)?\s*(.*?)```',
+            response,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if fenced_blocks:
+            return fenced_blocks[0].strip()
+
+        start = response.find('from manim import')
+        if start >= 0:
+            return response[start:].strip()
+
+        return response.strip()
+
+    @staticmethod
+    def validate_scene_code(scene_code: str) -> str | None:
+        """Return None for valid code, otherwise a short validation error."""
+        if not scene_code.strip():
+            return 'empty LLM response'
+
+        compact_code = re.sub(r'\s+', '', scene_code)
+        if 'construct(self)' not in compact_code:
+            return 'scene code is missing construct(self)'
+
+        try:
+            compile(scene_code, '<llm-manim-scene>', 'exec')
+        except SyntaxError as exc:
+            return f'scene code does not compile: {exc}'
+
+        if not LLMSceneGenerator.extract_scene_name(scene_code):
+            return 'scene code has no scene class with construct(self)'
+
+        return None
+
+    @staticmethod
+    def extract_scene_name(scene_code: str) -> str | None:
+        """Return the first class with a construct(self) method."""
+        try:
+            tree = ast.parse(scene_code)
+        except SyntaxError:
+            return None
+
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for item in node.body:
+                if not isinstance(item, ast.FunctionDef) or item.name != 'construct':
+                    continue
+                if item.args.args and item.args.args[0].arg == 'self':
+                    return node.name
+        return None
 
 
 class SceneGenerator:
@@ -258,8 +686,17 @@ class SceneGenerator:
       3. Fall back to LLM generation (Phase 2)
     """
 
-    def __init__(self, templates: dict[str, dict] | None = None):
+    def __init__(
+        self,
+        templates: dict[str, dict] | None = None,
+        enable_llm: bool = True,
+        scene_model: str | None = None,
+        llm_generator: LLMSceneGenerator | None = None,
+    ):
         self.templates = templates or SCENE_TEMPLATES
+        self.enable_llm = enable_llm
+        self.llm_generator = llm_generator
+        self.scene_model = scene_model
 
     def _match_concept(self, concept: str) -> str | None:
         """Match a concept string to a known template key."""
@@ -312,13 +749,17 @@ class SceneGenerator:
                 metadata={'template_key': template_key},
             )
 
-        # No template match — for now, return a placeholder
-        # Phase 2 will add LLM generation here
         domain = self._match_domain(concept) or 'general'
-        scene_name = re.sub(r'[^a-zA-Z0-9]', '', concept.title())[:40] or 'CustomScene'
+        scene_name = _scene_name_from_concept(concept)
 
-        if not scene_name.endswith('Scene'):
-            scene_name += 'Scene'
+        if self.enable_llm:
+            llm_generator = self.llm_generator or LLMSceneGenerator(model=self.scene_model)
+            return llm_generator.generate(
+                concept,
+                context=context,
+                scene_name=scene_name,
+                domain=domain,
+            )
 
         placeholder = self._generate_placeholder(concept, scene_name, domain)
         return GeneratedScene(
@@ -337,27 +778,4 @@ class SceneGenerator:
         This creates a minimal working scene that can be refined later
         by LLM generation or manual editing.
         """
-        safe_concept = concept.replace('"', '\\"').replace("'", "\\'")
-        return f'''
-from manim import *
-
-class {scene_name}(Scene):
-    """
-    Manim scene for: {safe_concept}
-    Domain: {domain}
-
-    This is a placeholder scene. Replace the construct() method
-    with proper Manim animations for this concept.
-    """
-    def construct(self):
-        title = Tex(r"{safe_concept}", font_size=48)
-        title.to_edge(UP)
-        self.play(Write(title))
-        self.wait(1)
-
-        # TODO: Add proper animation for {safe_concept}
-        placeholder = Tex(r"(Animation placeholder)", font_size=36, color=GREY)
-        placeholder.move_to(ORIGIN)
-        self.play(FadeIn(placeholder))
-        self.wait(2)
-'''
+        return _build_placeholder_scene(concept, scene_name, domain)

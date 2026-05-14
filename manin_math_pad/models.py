@@ -19,7 +19,11 @@ class Session(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     title = models.CharField(max_length=255, blank=True, default='')
-    context = models.JSONField(default=dict, blank=True, help_text='Session context: concepts discussed, current topic, etc.')
+    context = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Session context: concepts discussed, current topic, etc.',
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -68,7 +72,11 @@ class Animation(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     completed_at = models.DateTimeField(null=True, blank=True)
     duration_seconds = models.FloatField(null=True, blank=True)
-    metadata = models.JSONField(default=dict, blank=True, help_text='Rendering metadata: resolution, fps, etc.')
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Rendering metadata: resolution, fps, etc.',
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -89,7 +97,11 @@ class ZettelCluster(models.Model):
     session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name='zettel_clusters')
     topic = models.CharField(max_length=255, help_text='Central topic for the zettel cluster')
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='pending')
-    zettel_data = models.JSONField(default=dict, blank=True, help_text='Generated zettel cluster data')
+    zettel_data = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Generated zettel cluster data',
+    )
     error_message = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(default=timezone.now)
     completed_at = models.DateTimeField(null=True, blank=True)

@@ -1,16 +1,20 @@
 """Tests for Manin Math Pad engine components."""
 from __future__ import annotations
 
-import pytest
-from manin_math_pad.engine.scene_generator import SceneGenerator, SCENE_TEMPLATES, CONCEPT_DOMAINS
-from manin_math_pad.engine.zettel_generator import ZettelGenerator, ZettelCluster
+from manin_math_pad.engine.scene_generator import (
+    SCENE_TEMPLATES,
+    GeneratedScene,
+    LLMSceneGenerator,
+    SceneGenerator,
+)
+from manin_math_pad.engine.zettel_generator import ZettelGenerator
 
 
 class TestSceneGenerator:
     """Test the Manim scene generator."""
 
     def setup_method(self):
-        self.gen = SceneGenerator()
+        self.gen = SceneGenerator(enable_llm=False)
 
     def test_exact_template_match(self):
         """Exact concept names should match templates directly."""
@@ -45,7 +49,7 @@ class TestSceneGenerator:
 
     def test_placeholder_is_valid_python(self):
         """Generated placeholder code should be syntactically valid Python."""
-        result = self.gen.generate('obscure math concept xyz')
+        result = self.gen.generate('obscure "math"\nconcept xyz')
         compile(result.scene_code, '<test>', 'exec')  # Should not raise SyntaxError
 
     def test_template_code_is_valid_python(self):
@@ -64,8 +68,71 @@ class TestSceneGenerator:
     def test_context_passed_through(self):
         """Context dict should be accepted and stored in metadata."""
         ctx = {'previous_concepts': ['euler identity', 'complex numbers']}
-        result = self.gen.generate('derivative', context=ctx)
+        self.gen.generate('derivative', context=ctx)
         # Should not raise; context is accepted
+
+    def test_llm_extracts_python_code_block(self):
+        response = '''
+Here is the scene:
+
+```python
+from manim import *
+
+class LimitScene(Scene):
+    def construct(self):
+        self.wait(1)
+```
+'''
+        code = LLMSceneGenerator.extract_python_code(response)
+        assert code.startswith('from manim import *')
+        assert 'class LimitScene' in code
+
+    def test_llm_validation_requires_construct_and_valid_python(self):
+        valid = '''
+from manim import *
+
+class LimitScene(Scene):
+    def construct(self):
+        self.wait(1)
+'''
+        assert LLMSceneGenerator.validate_scene_code(valid) is None
+        assert LLMSceneGenerator.validate_scene_code('from manim import *') is not None
+        assert LLMSceneGenerator.validate_scene_code('def construct(self):\n  x =') is not None
+
+    def test_llm_generator_falls_back_on_invalid_response(self, monkeypatch):
+        llm = LLMSceneGenerator(model='unit-test-model')
+        monkeypatch.setattr(llm, '_call_llm', lambda prompt: 'not Python')
+
+        result = llm.generate('spectral sequence page turns')
+
+        assert result.source == 'placeholder'
+        assert 'construct(self)' in result.scene_code
+        compile(result.scene_code, '<fallback>', 'exec')
+        assert result.metadata['model'] == 'unit-test-model'
+
+    def test_scene_generator_uses_injected_llm_when_enabled(self):
+        class StubLLM:
+            def generate(self, concept, context=None, scene_name=None, domain='general'):
+                return GeneratedScene(
+                    concept=concept,
+                    scene_name=scene_name,
+                    scene_code='''
+from manim import *
+
+class HypergraphColoringScene(Scene):
+    def construct(self):
+        self.wait(1)
+''',
+                    source='llm',
+                    metadata={'domain': domain},
+                )
+
+        result = SceneGenerator(enable_llm=True, llm_generator=StubLLM()).generate(
+            'hypergraph coloring'
+        )
+
+        assert result.source == 'llm'
+        assert result.scene_name == 'HypergraphColoringScene'
 
 
 class TestZettelGenerator:
@@ -77,7 +144,8 @@ class TestZettelGenerator:
     def test_generates_central_note(self):
         cluster = self.gen.generate('euler identity')
         assert cluster.central_note is not None
-        assert 'euler' in cluster.central_note.title.lower() or 'Euler' in cluster.central_note.title
+        title = cluster.central_note.title
+        assert 'euler' in title.lower() or 'Euler' in title
 
     def test_generates_radiating_notes(self):
         cluster = self.gen.generate('derivative')

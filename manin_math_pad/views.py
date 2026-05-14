@@ -1,9 +1,12 @@
 """Manin Math Pad — API Views."""
 from __future__ import annotations
 
+import json
 import logging
 
 from django.http import FileResponse, JsonResponse
+from django.shortcuts import render
+from django.utils import timezone
 from django.views import View
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -13,6 +16,32 @@ from .engine.scene_generator import SceneGenerator
 from .engine.zettel_generator import ZettelGenerator
 
 logger = logging.getLogger(__name__)
+
+
+def _json_body(request) -> dict:
+    if not request.body:
+        return {}
+    return json.loads(request.body)
+
+
+def _file_url(file_field) -> str | None:
+    if not file_field:
+        return None
+    try:
+        return file_field.url
+    except Exception:
+        return None
+
+
+def _chat_page_context(request) -> dict:
+    path = request.path
+    if path.endswith('/chat/'):
+        api_base = path.removesuffix('chat/')
+    elif path.endswith('/chat-ui/'):
+        api_base = path.removesuffix('chat-ui/')
+    else:
+        api_base = '/api/manin/'
+    return {'api_base': api_base}
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -36,8 +65,7 @@ class SessionView(View):
 
     def post(self, request):
         """Create a new session."""
-        import json
-        body = json.loads(request.body) if request.body else {}
+        body = _json_body(request)
         session = Session.objects.create(
             title=body.get('title', ''),
             context=body.get('context', {}),
@@ -50,13 +78,68 @@ class SessionView(View):
 
 
 @method_decorator(csrf_exempt, name='dispatch')
+class SessionDetailView(View):
+    """Retrieve one session with messages and generated artifacts."""
+
+    def get(self, request, uid):
+        try:
+            session = Session.objects.get(uid=uid)
+        except Session.DoesNotExist:
+            return JsonResponse({'error': 'Session not found'}, status=404)
+
+        return JsonResponse(
+            {
+                'uid': str(session.uid),
+                'title': session.title,
+                'created_at': session.created_at.isoformat(),
+                'updated_at': session.updated_at.isoformat(),
+                'messages': [
+                    {
+                        'uid': str(message.uid),
+                        'role': message.role,
+                        'content': message.content,
+                        'created_at': message.created_at.isoformat(),
+                    }
+                    for message in session.messages.order_by('created_at')
+                ],
+                'animations': [
+                    _animation_payload(animation, include_urls=True)
+                    for animation in session.animations.order_by('created_at')
+                ],
+                'zettel_clusters': [
+                    {
+                        'uid': str(cluster.uid),
+                        'topic': cluster.topic,
+                        'status': cluster.status,
+                        'note_count': cluster.note_count,
+                        'created_at': cluster.created_at.isoformat(),
+                        'notes': cluster.zettel_data.get('notes', []),
+                    }
+                    for cluster in session.zettel_clusters.order_by('created_at')
+                ],
+            }
+        )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class ChatPageView(View):
+    """Serve the browser chat interface."""
+
+    def get(self, request):
+        return render(request, 'manin_math_pad/chat.html', _chat_page_context(request))
+
+
+@method_decorator(csrf_exempt, name='dispatch')
 class ChatView(View):
     """Send a message and receive a response."""
 
+    def get(self, request):
+        """Serve the chat page when accessed from a browser."""
+        return render(request, 'manin_math_pad/chat.html', _chat_page_context(request))
+
     def post(self, request):
         """Send a message to the math pad and get a response."""
-        import json
-        body = json.loads(request.body) if request.body else {}
+        body = _json_body(request)
         session_uid = body.get('session_uid')
         content = body.get('message', '').strip()
 
@@ -69,15 +152,31 @@ class ChatView(View):
             return JsonResponse({'error': 'Session not found'}, status=404)
 
         # Save user message
-        user_msg = Message.objects.create(session=session, role='user', content=content)
+        Message.objects.create(session=session, role='user', content=content)
 
-        # Generate response (Phase 1: template-based, Phase 2: LLM)
-        scene_gen = SceneGenerator()
+        # Generate response
+        scene_gen = SceneGenerator(enable_llm=True, scene_model=body.get('scene_model'))
         zettel_gen = ZettelGenerator()
 
         # Check if user wants an animation
-        wants_animation = any(kw in content.lower() for kw in ['animate', 'show me', 'visualize', 'draw', 'render'])
-        wants_zettel = any(kw in content.lower() for kw in ['zettel', 'notes', 'cluster', 'obsidian', 'connect'])
+        animate_flag = body.get('animate')
+        zettel_flag = body.get('zettel')
+        wants_animation = (
+            bool(animate_flag)
+            if animate_flag is not None
+            else any(
+                kw in content.lower()
+                for kw in ['animate', 'show me', 'visualize', 'draw', 'render']
+            )
+        )
+        wants_zettel = (
+            bool(zettel_flag)
+            if zettel_flag is not None
+            else any(
+                kw in content.lower()
+                for kw in ['zettel', 'notes', 'cluster', 'obsidian', 'connect']
+            )
+        )
 
         response_parts = []
 
@@ -92,7 +191,9 @@ class ChatView(View):
                 status='pending',
                 metadata={'source': generated.source, 'scene_name': generated.scene_name},
             )
-            response_parts.append(f'Animation queued for: {generated.concept} (source: {generated.source})')
+            response_parts.append(
+                f'Animation queued for: {generated.concept} (source: {generated.source})'
+            )
 
         # Generate zettel cluster if requested
         zettel = None
@@ -101,27 +202,32 @@ class ChatView(View):
             zettel = ZettelCluster.objects.create(
                 session=session,
                 topic=cluster.topic,
-                status='pending',
+                status='completed',
                 zettel_data={
                     'notes': [
                         {
                             'title': n.title,
                             'filename': n.filename,
+                            'content': n.content,
                             'tags': n.tags,
                             'links': n.links,
+                            'metadata': n.metadata,
                         }
                         for n in cluster.notes
                     ],
                     'domain': cluster.domain,
                 },
                 note_count=len(cluster.notes),
+                completed_at=timezone.now(),
             )
-            response_parts.append(f'Zettel cluster queued for: {cluster.topic} ({len(cluster.notes)} notes)')
+            response_parts.append(
+                f'Zettel cluster created for: {cluster.topic} ({len(cluster.notes)} notes)'
+            )
 
         # Build assistant response
         if not response_parts:
             response_text = f'Received: "{content}". '
-            if SceneGenerator()._match_concept(content):
+            if scene_gen._match_concept(content):
                 response_text += 'This concept has a template animation. Say "animate" to see it.'
             else:
                 response_text += 'Ask me to animate or create zettel notes for this concept.'
@@ -129,7 +235,7 @@ class ChatView(View):
             response_text = '\n'.join(response_parts)
 
         # Save assistant message
-        assistant_msg = Message.objects.create(
+        Message.objects.create(
             session=session,
             role='assistant',
             content=response_text,
@@ -172,8 +278,7 @@ class AnimateView(View):
 
     def post(self, request):
         """Queue an animation generation."""
-        import json
-        body = json.loads(request.body) if request.body else {}
+        body = _json_body(request)
         session_uid = body.get('session_uid')
         concept = body.get('concept', '').strip()
 
@@ -185,7 +290,7 @@ class AnimateView(View):
         except Session.DoesNotExist:
             return JsonResponse({'error': 'Session not found'}, status=404)
 
-        scene_gen = SceneGenerator()
+        scene_gen = SceneGenerator(enable_llm=True, scene_model=body.get('scene_model'))
         generated = scene_gen.generate(concept, context=session.context)
 
         animation = Animation.objects.create(
@@ -225,19 +330,14 @@ class AnimationStatusView(View):
                     filename=f'manim_{animation.concept[:40]}.mp4',
                 )
 
-        data = {
-            'uid': str(animation.uid),
-            'concept': animation.concept,
-            'status': animation.status,
-            'created_at': animation.created_at.isoformat(),
-        }
+        data = _animation_payload(
+            animation,
+            include_urls=True,
+            download_url=f'{request.path}?download=1',
+        )
 
         if animation.error_message:
             data['error'] = animation.error_message
-
-        if animation.status == 'completed':
-            data['duration_seconds'] = animation.duration_seconds
-            data['download_url'] = f'/api/manin/animate/{uid}/?download=1'
 
         return JsonResponse(data)
 
@@ -248,8 +348,7 @@ class ZettelView(View):
 
     def post(self, request):
         """Queue a zettel cluster generation."""
-        import json
-        body = json.loads(request.body) if request.body else {}
+        body = _json_body(request)
         session_uid = body.get('session_uid')
         topic = body.get('topic', '').strip()
 
@@ -283,7 +382,7 @@ class ZettelView(View):
                 'domain': cluster.domain,
             },
             note_count=len(cluster.notes),
-            completed_at=__import__('django.utils.timezone', fromlist=['now']).now(),
+            completed_at=timezone.now(),
         )
 
         return JsonResponse({
@@ -323,3 +422,35 @@ class ZettelStatusView(View):
             data['error'] = zettel.error_message
 
         return JsonResponse(data)
+
+
+def _animation_payload(
+    animation: Animation,
+    include_urls: bool = False,
+    download_url: str | None = None,
+) -> dict:
+    data = {
+        'uid': str(animation.uid),
+        'concept': animation.concept,
+        'status': animation.status,
+        'created_at': animation.created_at.isoformat(),
+        'scene_name': (animation.metadata or {}).get('scene_name'),
+        'source': (animation.metadata or {}).get('source'),
+    }
+
+    if animation.error_message:
+        data['error'] = animation.error_message
+
+    if animation.status == 'completed':
+        data['duration_seconds'] = animation.duration_seconds
+        data['download_url'] = download_url or f'/api/manin/animate/{animation.uid}/?download=1'
+
+    if include_urls:
+        video_url = _file_url(animation.video_file)
+        thumbnail_url = _file_url(animation.thumbnail_file)
+        if video_url:
+            data['video_url'] = video_url
+        if thumbnail_url:
+            data['thumbnail_url'] = thumbnail_url
+
+    return data
