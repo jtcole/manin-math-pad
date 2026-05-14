@@ -27,22 +27,46 @@ from typing import ClassVar
 logger = logging.getLogger(__name__)
 
 
-def _env_or_setting(name: str, default: str | None = None) -> str | None:
+def _env_or_setting(
+    name: str,
+    default: str | None = None,
+    aliases: tuple[str, ...] = (),
+) -> str | None:
     """Read config from the environment, then optional Django settings."""
-    value = os.environ.get(name)
-    if value:
-        return value
+    for key in (name, *aliases):
+        value = os.environ.get(key)
+        if value:
+            return value
 
     try:
         from django.conf import settings
 
         if settings.configured:
-            setting_value = getattr(settings, name, default)
-            return str(setting_value) if setting_value else default
+            for key in (name, *aliases):
+                setting_value = getattr(settings, key, None)
+                if setting_value:
+                    return str(setting_value)
     except Exception:
         return default
 
     return default
+
+
+def _float_env_or_setting(
+    name: str,
+    default: float,
+    aliases: tuple[str, ...] = (),
+) -> float:
+    """Read a float config value from the environment, then optional Django settings."""
+    raw_value = _env_or_setting(name, aliases=aliases)
+    if raw_value is None:
+        return default
+
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        logger.warning('Invalid %s value %r; using %s', name, raw_value, default)
+        return default
 
 
 # ─── Scene templates organized by domain ────────────────────────────────────
@@ -58,7 +82,7 @@ from manim import *
 class EulersIdentity(Scene):
     def construct(self):
         # Title
-        title = Tex(r"e^{i\\pi} = -1", font_size=72)
+        title = MathTex(r"e^{i\\pi} = -1", font_size=72)
         title.to_edge(UP)
         self.play(Write(title))
         self.wait(0.5)
@@ -81,10 +105,10 @@ class EulersIdentity(Scene):
             )
         )
         label = always_redraw(
-            lambda: Tex(
+            lambda: Text(
                 f"({{2 * np.cos(angle_tracker.get_value()):.2f}}, "
                 f"{{2 * np.sin(angle_tracker.get_value()):.2f}})",
-                font_size=36
+                font_size=28
             ).next_to(dot, UR, buff=0.2)
         )
 
@@ -92,7 +116,14 @@ class EulersIdentity(Scene):
         self.play(angle_tracker.animate.set_value(PI), run_time=3)
 
         # Show e^(i*pi) = -1
-        result = Tex(r"$e^{i\\pi} = \\cos(\\pi) + i\\sin(\\pi) = -1 + 0i = -1$", font_size=42)
+        result = MathTex(
+            r"e^{i\\pi}",
+            "=",
+            r"\\cos(\\pi) + i\\sin(\\pi)",
+            "=",
+            "-1",
+            font_size=42,
+        )
         result.to_edge(DOWN)
         self.play(Write(result))
         self.wait(2)
@@ -118,30 +149,35 @@ class DerivativeDefinition(Scene):
 
         # Function curve
         curve = axes.plot(lambda x: 0.5 * x**2 - x + 2, color=BLUE)
-        curve_label = Tex(r"f(x) = \\frac{1}{2}x^2 - x + 2", font_size=36).to_edge(UR)
+        curve_label = MathTex(r"f(x) = \\frac{1}{2}x^2 - x + 2", font_size=36).to_edge(UR)
         self.play(Create(curve), Write(curve_label))
 
         # Point on curve
+        func = lambda x: 0.5 * x**2 - x + 2
         x_val = 3
-        point = axes.c2p(x_val, 0.5 * x_val**2 - x_val + 2)
+        point = axes.c2p(x_val, func(x_val))
         dot = Dot(point, color=YELLOW)
 
         # Secant line (h shrinking)
         h_tracker = ValueTracker(3)
-        secant = always_redraw(
-            lambda: axes.get_secant_slope_curve(
-                lambda x: 0.5 * x**2 - x + 2,
-                x_val,
-                dx=h_tracker.get_value(),
-                color=RED,
-                secant_line_length=4
+        moving_dot = always_redraw(
+            lambda: Dot(
+                axes.c2p(x_val + h_tracker.get_value(), func(x_val + h_tracker.get_value())),
+                color=ORANGE
             )
         )
-        self.play(FadeIn(dot), Create(secant))
+        secant = always_redraw(
+            lambda: Line(
+                axes.c2p(x_val, func(x_val)),
+                axes.c2p(x_val + h_tracker.get_value(), func(x_val + h_tracker.get_value())),
+                color=RED
+            )
+        )
+        self.play(FadeIn(dot), FadeIn(moving_dot), Create(secant))
         self.wait(0.5)
 
         # Animate h → 0
-        title = Tex(r"f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h}", font_size=48)
+        title = MathTex(r"f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h}", font_size=48)
         title.to_edge(UP)
         self.play(Write(title))
 
@@ -160,18 +196,18 @@ class MatrixMultiplication(Scene):
     def construct(self):
         # Define matrices
         A = Matrix([["1", "2"], ["3", "4"]]).set_color(BLUE)
-        A_label = Tex("A", font_size=48).next_to(A, UP)
+        A_label = MathTex("A", font_size=48).next_to(A, UP)
 
-        times = Tex(r"\\times", font_size=48).next_to(A, RIGHT)
+        times = MathTex(r"\\times", font_size=48).next_to(A, RIGHT)
 
         B = Matrix([["5", "6"], ["7", "8"]]).set_color(GREEN)
-        B_label = Tex("B", font_size=48).next_to(B, UP)
+        B_label = MathTex("B", font_size=48).next_to(B, UP)
         B.next_to(times, RIGHT)
 
-        equals = Tex(r"=", font_size=48)
+        equals = MathTex(r"=", font_size=48)
 
         C = Matrix([["19", "22"], ["43", "50"]]).set_color(YELLOW)
-        C_label = Tex("C = AB", font_size=48).next_to(C, UP)
+        C_label = MathTex("C = AB", font_size=48).next_to(C, UP)
         C.next_to(equals, RIGHT)
         equals.next_to(B, RIGHT)
 
@@ -186,7 +222,7 @@ class MatrixMultiplication(Scene):
         self.wait(2)
 
         # Show computation step
-        step = Tex(r"c_{11} = 1 \\times 5 + 2 \\times 7 = 19", font_size=36)
+        step = MathTex(r"c_{11} = 1 \\times 5 + 2 \\times 7 = 19", font_size=36)
         step.to_edge(DOWN)
         self.play(Write(step))
         self.wait(2)
@@ -201,7 +237,7 @@ from manim import *
 
 class FourierSeriesSquare(Scene):
     def construct(self):
-        title = Tex("Fourier Series: Square Wave Approximation", font_size=42)
+        title = Text("Fourier Series: Square Wave Approximation", font_size=38)
         title.to_edge(UP)
         self.play(Write(title))
 
@@ -235,9 +271,9 @@ class FourierSeriesSquare(Scene):
         )
 
         terms_label = always_redraw(
-            lambda: Tex(
+            lambda: Text(
                 f"n = {int(n_terms_tracker.get_value())} terms",
-                font_size=36
+                font_size=30
             ).to_edge(DR)
         )
 
@@ -367,16 +403,16 @@ class {scene_name}(Scene):
         concept = {concept_literal}
         domain = {domain_literal}
 
-        title = Tex(concept, font_size=48)
+        title = Text(concept, font_size=42)
         title.to_edge(UP)
         self.play(Write(title))
         self.wait(1)
 
-        placeholder = Tex(f"Animation placeholder: {{domain}}", font_size=36, color=GREY)
+        placeholder = Text(f"Animation placeholder: {{domain}}", font_size=32, color=GREY)
         placeholder.move_to(ORIGIN)
         self.play(FadeIn(placeholder))
         self.wait(2)
-'''
+'''.strip()
 
 
 @dataclass
@@ -393,43 +429,143 @@ class LLMSceneGenerator:
 
     model: str | None = None
     timeout: int = 30
-    temperature: float = 0.2
+    temperature: float = field(
+        default_factory=lambda: _float_env_or_setting(
+            'MANIM_SCENE_TEMPERATURE',
+            0.3,
+            # Backward compatibility for the pre-migration misspelling.
+            aliases=('MANIN_SCENE_TEMPERATURE',),
+        )
+    )
     provider: str = field(init=False)
 
     DEFAULT_OPENAI_MODEL: ClassVar[str] = 'gpt-4o-mini'
     DEFAULT_OLLAMA_MODEL: ClassVar[str] = 'deepseek-v4-pro'
 
-    MANIM_KNOWLEDGE: ClassVar[str] = """
-Available Manim knowledge:
-- Use a Scene class with a construct(self) method.
-- Common objects: Circle, Square, Axes, Tex, MathTex, Matrix, VGroup, Dot, Arrow,
-  Line, NumberPlane, DecimalNumber, Brace, SurroundingRectangle.
-- Common animations: Write, Create, FadeIn, FadeOut, Transform, ReplacementTransform,
-  MoveToTarget, GrowArrow, Indicate, Circumscribe.
-- Use ValueTracker for dynamic animations.
-- Use always_redraw for linked objects that should update with trackers.
-- Use self.play(...) and self.wait(...) to control timing.
-"""
+    SYSTEM_PROMPT: ClassVar[str] = """
+You generate concise, valid Manim Community Edition scene code.
 
-    EXAMPLE_SCENE_TEMPLATE: ClassVar[str] = """
+Available Manim classes and helpers:
+- Scene, ThreeDScene
+- Circle, Square, Rectangle, Axes, NumberPlane
+- Text, Tex, MathTex, Matrix, VGroup, VDict
+- Dot, Arrow, Line, CurvedArrow, Arc, Annulus, Brace
+- ValueTracker, always_redraw
+
+Available animations:
+- Write, Create, FadeIn, FadeOut
+- Transform, ReplacementTransform, MoveTo, Rotate, Scale
+- GrowFromCenter, ShrinkToCenter, DrawBorderThenFill
+- Indicate, Flash, Circumscribe, Wiggle
+
+Camera methods:
+- move_camera(...)
+- camera.frame.animate.scale(...)
+- camera.frame.animate.move_to(...)
+
+Plain English labels can use Text(); mathematical notation should usually use
+Tex() or MathTex(). Keep scenes short, deterministic, and free of external
+assets.
+""".strip()
+
+    FEW_SHOT_EXAMPLES: ClassVar[tuple[str, str, str]] = (
+        """
+Concept: limit definition of the derivative
+Domain: calculus
+```python
 from manim import *
 
-class ExampleConceptScene(Scene):
+class LimitDefinitionScene(Scene):
     def construct(self):
-        title = Tex("Example Concept", font_size=48)
+        title = MathTex(r"f'(a)=\\lim_{h\\to0}\\frac{f(a+h)-f(a)}{h}")
         title.to_edge(UP)
-        self.play(Write(title))
-
-        dot = Dot(color=YELLOW)
-        circle = Circle(radius=2, color=BLUE)
-        self.play(Create(circle), FadeIn(dot))
-        self.play(dot.animate.shift(RIGHT * 2))
+        axes = Axes(x_range=[-1, 5], y_range=[-1, 7], x_length=7, y_length=4)
+        curve = axes.plot(lambda x: 0.35 * x * x + 1, color=BLUE)
+        a = 2
+        h = ValueTracker(2)
+        moving_dot = always_redraw(
+            lambda: Dot(axes.c2p(a + h.get_value(), 0.35 * (a + h.get_value()) ** 2 + 1))
+        )
+        base_dot = Dot(axes.c2p(a, 0.35 * a * a + 1), color=YELLOW)
+        secant = always_redraw(
+            lambda: Line(
+                base_dot.get_center(),
+                moving_dot.get_center(),
+                color=RED,
+            ).set_length(4)
+        )
+        label = always_redraw(lambda: MathTex(f"h={h.get_value():.2f}").to_edge(DOWN))
+        self.play(Write(title), Create(axes), Create(curve))
+        self.play(FadeIn(base_dot), FadeIn(moving_dot), Create(secant), Write(label))
+        self.play(h.animate.set_value(0.05), run_time=3)
+        self.play(Indicate(base_dot))
         self.wait(1)
-"""
+```
+""".strip(),
+        """
+Concept: Pythagorean theorem visual proof
+Domain: geometry
+```python
+from manim import *
+
+class PythagoreanProofScene(Scene):
+    def construct(self):
+        title = MathTex(r"a^2+b^2=c^2").to_edge(UP)
+        p1 = ORIGIN
+        p2 = 3 * RIGHT
+        p3 = 3 * RIGHT + 2 * UP
+        triangle = VGroup(Line(p1, p2), Line(p2, p3), Line(p3, p1)).set_color(WHITE)
+        triangle.move_to(ORIGIN)
+        a_square = Square(side_length=2, color=BLUE).next_to(triangle, LEFT, buff=0.15)
+        b_square = Square(side_length=3, color=GREEN).next_to(triangle, DOWN, buff=0.15)
+        c_square = Square(side_length=3.6, color=YELLOW).next_to(triangle, UR, buff=0.15)
+        labels = VGroup(
+            MathTex("a^2").move_to(a_square),
+            MathTex("b^2").move_to(b_square),
+            MathTex("c^2").move_to(c_square),
+        )
+        self.play(Write(title))
+        self.play(Create(triangle), DrawBorderThenFill(a_square))
+        self.play(DrawBorderThenFill(b_square), DrawBorderThenFill(c_square))
+        self.play(Write(labels))
+        self.play(Circumscribe(VGroup(a_square, b_square)), Flash(c_square))
+        self.wait(1)
+```
+""".strip(),
+        """
+Concept: eigenvectors under a linear transformation
+Domain: linear algebra
+```python
+from manim import *
+
+class EigenvectorScene(Scene):
+    def construct(self):
+        plane = NumberPlane(x_range=[-4, 4], y_range=[-3, 3])
+        title = Text("Eigenvectors keep their direction", font_size=34).to_edge(UP)
+        matrix = [[2, 0], [0, 0.5]]
+        vector = Arrow(ORIGIN, RIGHT + UP, buff=0, color=YELLOW)
+        eigen = Arrow(ORIGIN, 2 * RIGHT, buff=0, color=GREEN)
+        transformed_vector = vector.copy().apply_matrix(matrix)
+        transformed_eigen = eigen.copy().apply_matrix(matrix)
+        labels = VGroup(
+            MathTex(r"v").next_to(vector.get_end(), UP),
+            MathTex(r"Av").next_to(transformed_vector.get_end(), UP),
+            MathTex(r"e").next_to(eigen.get_end(), DOWN),
+            MathTex(r"Ae").next_to(transformed_eigen.get_end(), DOWN),
+        )
+        self.play(Create(plane), Write(title))
+        self.play(Create(vector), Create(eigen), Write(labels[0]), Write(labels[2]))
+        self.play(Transform(vector, transformed_vector), Transform(eigen, transformed_eigen))
+        self.play(ReplacementTransform(labels[0], labels[1]))
+        self.play(ReplacementTransform(labels[2], labels[3]), Wiggle(eigen))
+        self.wait(1)
+```
+""".strip(),
+    )
 
     def __post_init__(self) -> None:
         self.provider = self._detect_provider()
-        env_model = _env_or_setting('MANIN_SCENE_MODEL')
+        env_model = _env_or_setting('MANIM_SCENE_MODEL', aliases=('MANIN_SCENE_MODEL',))
         if not self.model:
             self.model = env_model or self._default_model()
 
@@ -514,7 +650,15 @@ class ExampleConceptScene(Scene):
         if context:
             context_text = json.dumps(context, default=str)[:1200]
 
+        few_shots = '\n\n'.join(self.FEW_SHOT_EXAMPLES)
+
         return f"""
+{self.SYSTEM_PROMPT}
+
+Use these examples as style and API references:
+
+{few_shots}
+
 Generate Manim Community Edition Python code for this math animation.
 
 Concept description:
@@ -529,13 +673,6 @@ Session context:
 Required scene class name:
 {scene_name}
 
-{self.MANIM_KNOWLEDGE}
-
-Example scene template:
-```python
-{self.EXAMPLE_SCENE_TEMPLATE.strip()}
-```
-
 Rules:
 - Return one Python code block only.
 - The code must start with `from manim import *`.
@@ -543,6 +680,7 @@ Rules:
 - The scene must include `def construct(self):`.
 - Keep the animation short and renderable without external assets.
 - Use valid Python and valid Manim Community Edition APIs.
+- Prefer Text() for plain labels when Tex()/MathTex() is unnecessary.
 """.strip()
 
     def _call_llm(self, prompt: str) -> str:
@@ -588,10 +726,7 @@ Rules:
                 'messages': [
                     {
                         'role': 'system',
-                        'content': (
-                            'You generate concise, valid Manim Community Edition '
-                            'scene code. Return only a Python code block.'
-                        ),
+                        'content': self.SYSTEM_PROMPT,
                     },
                     {'role': 'user', 'content': prompt},
                 ],
@@ -624,13 +759,11 @@ Rules:
         if not response:
             return ''
 
-        fenced_blocks = re.findall(
-            r'```(?:python|py)?\s*(.*?)```',
-            response,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if fenced_blocks:
-            return fenced_blocks[0].strip()
+        fenced_blocks = re.findall(r'```([^\n`]*)\n(.*?)```', response, flags=re.DOTALL)
+        for language_tag, code in fenced_blocks:
+            normalized_tag = language_tag.strip().lower()
+            if not normalized_tag or normalized_tag.startswith(('python', 'py')):
+                return code.strip()
 
         start = response.find('from manim import')
         if start >= 0:
@@ -742,7 +875,7 @@ class SceneGenerator:
             return GeneratedScene(
                 concept=concept,
                 scene_name=template['name'],
-                scene_code=template['template'],
+                scene_code=template['template'].lstrip(),
                 base_class=template.get('base_class', 'Scene'),
                 description=template.get('description', ''),
                 source='template',

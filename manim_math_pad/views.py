@@ -1,10 +1,17 @@
 """Manim Math Pad — API Views."""
 from __future__ import annotations
 
+import io
 import json
 import logging
+import os
+import re
+import zipfile
+from pathlib import Path
 
-from django.http import FileResponse, JsonResponse
+from django.conf import settings
+from django.core.files import File
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
 from django.views import View
@@ -12,7 +19,10 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import Animation, Message, Session, ZettelCluster
-from .engine.scene_generator import SceneGenerator
+from .engine.chat_service import MathChatService
+from .engine.renderer import ManimRenderer
+from .engine.scene_generator import LLMSceneGenerator, SceneGenerator
+from .engine.vault_exporter import VaultZettelExporter
 from .engine.zettel_generator import ZettelGenerator
 
 logger = logging.getLogger(__name__)
@@ -42,6 +52,64 @@ def _chat_page_context(request) -> dict:
     else:
         api_base = '/api/manim/'
     return {'api_base': api_base}
+
+
+def _env_or_setting(name: str, default=None):
+    value = os.environ.get(name)
+    if value is not None:
+        return value
+    return getattr(settings, name, default)
+
+
+def _truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {'1', 'true', 'yes', 'on', 'inline'}
+
+
+def _scene_llm_enabled(body: dict) -> bool:
+    if 'enable_llm' in body:
+        return _truthy(body.get('enable_llm'))
+    if 'use_llm' in body:
+        return _truthy(body.get('use_llm'))
+
+    configured = _env_or_setting('MANIM_ENABLE_LLM')
+    if configured is not None:
+        return _truthy(configured)
+
+    return bool(
+        body.get('scene_model')
+        or _env_or_setting('OPENAI_API_KEY')
+        or _env_or_setting('OLLAMA_HOST')
+        or _env_or_setting('MANIM_SCENE_MODEL')
+        # Backward compatibility for the pre-migration misspelling.
+        or _env_or_setting('MANIN_SCENE_MODEL')
+    )
+
+
+def _render_mode(body: dict) -> str:
+    return str(body.get('render_mode') or _env_or_setting('MANIM_RENDER_MODE', 'queue')).lower()
+
+
+def _int_option(body: dict, key: str, default: int) -> int:
+    try:
+        return int(body.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _int_config(name: str, default: int) -> int:
+    try:
+        return int(_env_or_setting(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _slug(value: str, fallback: str = 'export') -> str:
+    slug = re.sub(r'[^a-zA-Z0-9_-]+', '-', value.lower()).strip('-')
+    return slug[:80] or fallback
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -122,6 +190,50 @@ class SessionDetailView(View):
 
 
 @method_decorator(csrf_exempt, name='dispatch')
+class SessionExportView(View):
+    """Export a session transcript, scene code, videos, and zettel notes."""
+
+    def get(self, request, uid):
+        try:
+            session = Session.objects.get(uid=uid)
+        except Session.DoesNotExist:
+            return JsonResponse({'error': 'Session not found'}, status=404)
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('transcript.md', _session_transcript(session))
+
+            for animation in session.animations.order_by('created_at'):
+                if animation.scene_code:
+                    code_name = f'{animation.uid}_{_slug(animation.concept, "scene")}.py'
+                    archive.writestr(f'manim/{code_name}', animation.scene_code)
+                if animation.video_file:
+                    try:
+                        with animation.video_file.open('rb') as video_file:
+                            extension = Path(animation.video_file.name).suffix or '.mp4'
+                            archive.writestr(
+                                f'figures/{animation.uid}{extension}',
+                                video_file.read(),
+                            )
+                    except OSError:
+                        logger.warning('Could not include video for animation %s', animation.uid)
+
+            for cluster in session.zettel_clusters.filter(status='completed').order_by('created_at'):
+                cluster_dir = f'zettel/{cluster.uid}'
+                for note in cluster.zettel_data.get('notes', []):
+                    filename = _slug(str(note.get('filename') or note.get('title')), 'note')
+                    archive.writestr(
+                        f'{cluster_dir}/{filename}.md',
+                        str(note.get('content') or ''),
+                    )
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/zip')
+        filename = f'manim-math-pad-{_slug(session.title or str(session.uid), "session")}.zip'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+
+@method_decorator(csrf_exempt, name='dispatch')
 class ChatPageView(View):
     """Serve the browser chat interface."""
 
@@ -151,11 +263,14 @@ class ChatView(View):
         except Session.DoesNotExist:
             return JsonResponse({'error': 'Session not found'}, status=404)
 
-        # Save user message
         Message.objects.create(session=session, role='user', content=content)
 
-        # Generate response
-        scene_gen = SceneGenerator(enable_llm=True, scene_model=body.get('scene_model'))
+        chat_service = MathChatService()
+        chat_turn = chat_service.respond(content, session.context)
+        scene_gen = SceneGenerator(
+            enable_llm=_scene_llm_enabled(body),
+            scene_model=body.get('scene_model'),
+        )
         zettel_gen = ZettelGenerator()
 
         # Check if user wants an animation
@@ -178,12 +293,12 @@ class ChatView(View):
             )
         )
 
-        response_parts = []
+        response_parts = [chat_turn.answer]
 
         # Generate animation if requested
         animation = None
         if wants_animation:
-            generated = scene_gen.generate(content, context=session.context)
+            generated = scene_gen.generate(chat_turn.concept, context=chat_turn.artifact_context)
             animation = Animation.objects.create(
                 session=session,
                 concept=generated.concept,
@@ -191,14 +306,18 @@ class ChatView(View):
                 status='pending',
                 metadata={'source': generated.source, 'scene_name': generated.scene_name},
             )
+            animation = _maybe_render_inline(animation, body)
             response_parts.append(
-                f'Animation queued for: {generated.concept} (source: {generated.source})'
+                _artifact_status_sentence('Animation', animation.status, generated.concept)
             )
 
         # Generate zettel cluster if requested
         zettel = None
         if wants_zettel:
-            cluster = zettel_gen.generate(content, session_context=session.context)
+            cluster = zettel_gen.generate(
+                chat_turn.concept,
+                session_context=chat_turn.artifact_context,
+            )
             zettel = ZettelCluster.objects.create(
                 session=session,
                 topic=cluster.topic,
@@ -224,15 +343,7 @@ class ChatView(View):
                 f'Zettel cluster created for: {cluster.topic} ({len(cluster.notes)} notes)'
             )
 
-        # Build assistant response
-        if not response_parts:
-            response_text = f'Received: "{content}". '
-            if scene_gen._match_concept(content):
-                response_text += 'This concept has a template animation. Say "animate" to see it.'
-            else:
-                response_text += 'Ask me to animate or create zettel notes for this concept.'
-        else:
-            response_text = '\n'.join(response_parts)
+        response_text = '\n\n'.join(response_parts)
 
         # Save assistant message
         Message.objects.create(
@@ -241,12 +352,9 @@ class ChatView(View):
             content=response_text,
         )
 
-        # Update session context
-        context = session.context
-        concepts = context.get('concepts', [])
-        concepts.append(content)
-        context['concepts'] = concepts[-20:]  # Keep last 20
-        session.context = context
+        session.context = chat_turn.context
+        if not session.title:
+            session.title = chat_turn.concept.title()[:255]
         session.save()
 
         response_data = {
@@ -255,11 +363,7 @@ class ChatView(View):
         }
 
         if animation:
-            response_data['animation'] = {
-                'uid': str(animation.uid),
-                'concept': animation.concept,
-                'status': animation.status,
-            }
+            response_data['animation'] = _animation_payload(animation, include_urls=True)
 
         if zettel:
             response_data['zettel'] = {
@@ -290,8 +394,12 @@ class AnimateView(View):
         except Session.DoesNotExist:
             return JsonResponse({'error': 'Session not found'}, status=404)
 
-        scene_gen = SceneGenerator(enable_llm=True, scene_model=body.get('scene_model'))
-        generated = scene_gen.generate(concept, context=session.context)
+        artifact_context = MathChatService().artifact_context(session.context, concept)
+        scene_gen = SceneGenerator(
+            enable_llm=_scene_llm_enabled(body),
+            scene_model=body.get('scene_model'),
+        )
+        generated = scene_gen.generate(concept, context=artifact_context)
 
         animation = Animation.objects.create(
             session=session,
@@ -300,14 +408,9 @@ class AnimateView(View):
             status='pending',
             metadata={'source': generated.source, 'scene_name': generated.scene_name},
         )
+        animation = _maybe_render_inline(animation, body)
 
-        return JsonResponse({
-            'uid': str(animation.uid),
-            'concept': animation.concept,
-            'status': animation.status,
-            'scene_name': generated.scene_name,
-            'source': generated.source,
-        }, status=201)
+        return JsonResponse(_animation_payload(animation, include_urls=True), status=201)
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -361,7 +464,8 @@ class ZettelView(View):
             return JsonResponse({'error': 'Session not found'}, status=404)
 
         zettel_gen = ZettelGenerator()
-        cluster = zettel_gen.generate(topic, session_context=session.context)
+        artifact_context = MathChatService().artifact_context(session.context, topic)
+        cluster = zettel_gen.generate(topic, session_context=artifact_context)
 
         zettel = ZettelCluster.objects.create(
             session=session,
@@ -424,6 +528,164 @@ class ZettelStatusView(View):
         return JsonResponse(data)
 
 
+@method_decorator(csrf_exempt, name='dispatch')
+class ZettelExportView(View):
+    """Export a completed zettel cluster to the configured Obsidian vault."""
+
+    def post(self, request, uid):
+        """Write cluster notes as Markdown files."""
+        try:
+            zettel = ZettelCluster.objects.get(uid=uid)
+        except ZettelCluster.DoesNotExist:
+            return JsonResponse({'error': 'Zettel cluster not found'}, status=404)
+
+        exporter = VaultZettelExporter()
+        try:
+            result = exporter.export_cluster(zettel)
+        except ValueError as exc:
+            return JsonResponse({'error': str(exc)}, status=400)
+
+        data = result.as_json()
+        data.update(
+            {
+                'uid': str(zettel.uid),
+                'topic': zettel.topic,
+                'status': zettel.status,
+            }
+        )
+        return JsonResponse(data)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class ZettelExportAllView(View):
+    """Export all completed zettel clusters for one session."""
+
+    def post(self, request):
+        """Write all completed cluster notes for a session."""
+        body = _json_body(request)
+        session_uid = body.get('session_uid')
+        if not session_uid:
+            return JsonResponse({'error': 'session_uid is required'}, status=400)
+
+        try:
+            session = Session.objects.get(uid=session_uid)
+        except Session.DoesNotExist:
+            return JsonResponse({'error': 'Session not found'}, status=404)
+
+        exporter = VaultZettelExporter()
+        results = [
+            exporter.export_cluster(cluster).as_json()
+            for cluster in session.zettel_clusters.filter(status='completed').order_by('created_at')
+        ]
+
+        return JsonResponse(
+            {
+                'session_uid': str(session.uid),
+                'cluster_count': len(results),
+                'clusters': results,
+                'created_paths': [
+                    path
+                    for result in results
+                    for path in result.get('created_paths', [])
+                ],
+                'skipped_paths': [
+                    path
+                    for result in results
+                    for path in result.get('skipped_paths', [])
+                ],
+            }
+        )
+
+
+def _artifact_status_sentence(kind: str, status: str, concept: str) -> str:
+    if status == 'completed':
+        return f'{kind} completed for: {concept}'
+    if status == 'failed':
+        return f'{kind} failed for: {concept}. Open the artifact details for the render error.'
+    if status == 'rendering':
+        return f'{kind} is rendering for: {concept}'
+    return f'{kind} queued for: {concept}'
+
+
+def _maybe_render_inline(animation: Animation, body: dict) -> Animation:
+    """Render immediately when local/demo inline mode is enabled."""
+    if _render_mode(body) not in {'inline', 'sync', 'immediate'}:
+        return animation
+
+    scene_name = (animation.metadata or {}).get('scene_name')
+    if not scene_name:
+        scene_name = LLMSceneGenerator.extract_scene_name(animation.scene_code)
+
+    if not scene_name:
+        animation.status = 'failed'
+        animation.error_message = 'Could not determine Manim scene class name'
+        animation.completed_at = timezone.now()
+        animation.save(update_fields=['status', 'error_message', 'completed_at'])
+        return animation
+
+    metadata = animation.metadata or {}
+    metadata['scene_name'] = scene_name
+    metadata['render_mode'] = 'inline'
+    animation.metadata = metadata
+    animation.status = 'rendering'
+    animation.error_message = ''
+    animation.save(update_fields=['metadata', 'status', 'error_message'])
+
+    renderer = ManimRenderer(
+        output_dir=_inline_render_output_dir(),
+        quality=str(body.get('quality') or _env_or_setting('MANIM_RENDER_QUALITY', 'low_quality')),
+        fps=_int_option(body, 'fps', _int_config('MANIM_RENDER_FPS', 15)),
+        manim_cmd=str(body.get('manim_cmd') or _env_or_setting('MANIM_CMD', 'manim')),
+    )
+    result = renderer.render(
+        animation.scene_code,
+        scene_name,
+        job_uid=str(animation.uid),
+        timeout=_int_option(body, 'timeout', _int_config('MANIM_RENDER_TIMEOUT', 120)),
+    )
+
+    metadata = animation.metadata or {}
+    metadata.update(result.metadata or {})
+    animation.metadata = metadata
+    animation.completed_at = timezone.now()
+    animation.duration_seconds = result.duration_seconds
+
+    if not result.success:
+        animation.status = 'failed'
+        animation.error_message = (result.error_message or 'Unknown render failure')[:2000]
+        animation.save(
+            update_fields=[
+                'metadata',
+                'status',
+                'error_message',
+                'completed_at',
+                'duration_seconds',
+            ]
+        )
+        return animation
+
+    animation.status = 'completed'
+    animation.error_message = ''
+    if result.video_path:
+        with Path(result.video_path).open('rb') as video_file:
+            animation.video_file.save(
+                f'{animation.uid}.{Path(result.video_path).suffix.lstrip(".")}',
+                File(video_file),
+                save=False,
+            )
+    if result.thumbnail_path:
+        with Path(result.thumbnail_path).open('rb') as thumbnail_file:
+            animation.thumbnail_file.save(f'{animation.uid}.jpg', File(thumbnail_file), save=False)
+
+    animation.save()
+    return animation
+
+
+def _inline_render_output_dir() -> Path:
+    media_root = Path(getattr(settings, 'MEDIA_ROOT', '') or '/tmp/manim_math_pad_media')
+    return media_root / 'manim' / 'inline_renders'
+
+
 def _animation_payload(
     animation: Animation,
     include_urls: bool = False,
@@ -437,6 +699,9 @@ def _animation_payload(
         'scene_name': (animation.metadata or {}).get('scene_name'),
         'source': (animation.metadata or {}).get('source'),
     }
+
+    if animation.scene_code:
+        data['scene_code'] = animation.scene_code
 
     if animation.error_message:
         data['error'] = animation.error_message
@@ -454,3 +719,52 @@ def _animation_payload(
             data['thumbnail_url'] = thumbnail_url
 
     return data
+
+
+def _session_transcript(session: Session) -> str:
+    """Render a session transcript with artifact references."""
+    title = session.title or f'Session {session.uid}'
+    lines = [
+        f'# {title}',
+        '',
+        f'- Session: {session.uid}',
+        f'- Created: {session.created_at.isoformat()}',
+        f'- Updated: {session.updated_at.isoformat()}',
+        '',
+        '## Transcript',
+        '',
+    ]
+
+    for message in session.messages.order_by('created_at'):
+        lines.extend(
+            [
+                f'### {message.role.title()}',
+                '',
+                message.content,
+                '',
+            ]
+        )
+
+    animations = list(session.animations.order_by('created_at'))
+    if animations:
+        lines.extend(['## Manim Scenes', ''])
+        for animation in animations:
+            lines.extend(
+                [
+                    f'- {animation.concept} ({animation.status})',
+                    f'  - UID: {animation.uid}',
+                    f'  - Scene: {(animation.metadata or {}).get("scene_name") or "unknown"}',
+                ]
+            )
+            if animation.video_file:
+                lines.append(f'  - Video: figures/{animation.uid}{Path(animation.video_file.name).suffix}')
+        lines.append('')
+
+    clusters = list(session.zettel_clusters.filter(status='completed').order_by('created_at'))
+    if clusters:
+        lines.extend(['## Zettel Clusters', ''])
+        for cluster in clusters:
+            lines.append(f'- {cluster.topic}: {cluster.note_count} notes ({cluster.uid})')
+        lines.append('')
+
+    return '\n'.join(lines).rstrip() + '\n'

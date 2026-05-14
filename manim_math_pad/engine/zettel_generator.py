@@ -211,15 +211,19 @@ class ZettelGenerator:
             cluster.notes.append(note)
             central.links.append(note.filename)
 
+        storyline = self._generate_storyline_note(concept, domain, central.filename)
+        cluster.notes.append(storyline)
+        central.links.append(storyline.filename)
+
         # Context connections
         if session_context.get('previous_concepts'):
             for prev_concept in session_context['previous_concepts'][:3]:
                 prev_slug = self._slugify(prev_concept)
                 connection = ZettelNote(
-                    title=f'{concept} ↔ {prev_concept}',
+                    title=f'{concept} connects to {prev_concept}',
                     filename=(
                         f'zettel_{self.timestamp}_'
-                        f'{concept.lower().replace(" ", "-")}-connects-{prev_slug}'
+                        f'{self._slugify(concept)}-connects-{prev_slug}'
                     ),
                     content=self._connection_content(concept, prev_concept, domain),
                     tags=[domain, 'connection', 'zettel'],
@@ -231,8 +235,82 @@ class ZettelGenerator:
                     },
                 )
                 cluster.notes.append(connection)
+                central.links.append(connection.filename)
 
+        self._finalize_central_links(central)
         return cluster
+
+    def _finalize_central_links(self, central: ZettelNote) -> None:
+        """Render collected wiki-links into the central note."""
+        if central.links:
+            links = '\n'.join(f'- [[{link}]]' for link in central.links)
+        else:
+            links = '- No linked notes yet.'
+        central.content = central.content.replace('{{links}}', links)
+
+    def _field_content(self, concept: str, field_name: str, domain: str) -> str:
+        """Return deterministic, populated note content for one cluster aspect."""
+        concept_title = concept.title()
+        domain_label = domain.replace('_', ' ')
+        field_key = field_name.lower()
+
+        if 'definition' in field_key or 'statement' in field_key:
+            return (
+                f'{concept_title} names a {domain_label} idea by fixing the objects, '
+                f'the allowed operations, and the relation being studied. A useful '
+                f'working definition should make clear what counts as an example, '
+                f'what data is required, and which quantities are preserved.'
+            )
+
+        if 'intuition' in field_key or 'geometric' in field_key or 'visualization' in field_key:
+            return (
+                f'The intuition for {concept} is to track what changes and what remains '
+                f'invariant as the representation moves. A good animation should make '
+                f'the invariant visible first, then show the transformation or limiting '
+                f'process that reveals the structure.'
+            )
+
+        if 'formula' in field_key or 'matrix' in field_key or 'axiom' in field_key:
+            return (
+                f'The symbolic form for {concept} should be read as a compact record of '
+                f'assumptions and operations. Identify the inputs, the rule that combines '
+                f'them, and the output being compared; this prevents the notation from '
+                f'becoming detached from the mathematical action.'
+            )
+
+        if 'mistake' in field_key or 'condition' in field_key:
+            return (
+                f'A common failure mode is applying {concept} after one of its hypotheses '
+                f'has been dropped. Check the domain, boundary cases, and whether the '
+                f'objects involved satisfy the assumptions before transferring a result.'
+            )
+
+        if 'application' in field_key or 'example' in field_key:
+            return (
+                f'Use examples of {concept} that expose the mechanism, not just the final '
+                f'answer. Start with a small concrete case, compute it directly, then '
+                f'explain which part of the computation scales to the general situation.'
+            )
+
+        if 'theorem' in field_key or 'result' in field_key or 'property' in field_key:
+            return (
+                f'The important results around {concept} usually describe invariance, '
+                f'existence, uniqueness, or approximation. State each result with its '
+                f'conditions attached, then separate the proof idea from the formal proof.'
+            )
+
+        if 'connection' in field_key or 'related' in field_key or 'classification' in field_key:
+            return (
+                f'Place {concept} in a local map: what it generalizes, what it depends on, '
+                f'and which neighboring ideas solve the same problem with different '
+                f'constraints. These links are where the note becomes reusable.'
+            )
+
+        return (
+            f'This aspect of {concept} captures how the idea behaves inside {domain_label}. '
+            f'Keep the note atomic: one claim, one example, and one link back to the '
+            f'central concept.'
+        )
 
     def _generate_central_note(self, concept: str, domain: str, template: dict) -> ZettelNote:
         """Generate the central (hub) note for the cluster."""
@@ -241,7 +319,7 @@ class ZettelGenerator:
         title = concept.title()
 
         fields_section = '\n'.join(
-            f'### {field}\n\n_TODO: Add content_\n'
+            f'### {field}\n\n{self._field_content(concept, field, domain)}\n'
             for field in template['central_fields']
         )
 
@@ -265,7 +343,9 @@ concept: "{concept}"
 
 ## Overview
 
-{concept} — a concept in {domain}.
+{concept} is a {domain.replace('_', ' ')} concept worth keeping as a reusable
+thinking tool. This cluster separates the definition, intuition, examples, and
+connections so the idea can support both conversation and animation work.
 
 {fields_section}
 
@@ -279,7 +359,8 @@ concept: "{concept}"
 
 ## References
 
-- _TODO: Add primary references_
+- Add a textbook, paper, or lecture note when this cluster is promoted from
+  working notes to a permanent reference.
 """
 
         return ZettelNote(
@@ -303,6 +384,7 @@ concept: "{concept}"
         field_slug = self._slugify(field_name)
         filename = f'zettel_{self.timestamp}_{slug}-{field_slug}'
         title = f'{concept} — {field_name}'
+        aspect_content = self._field_content(concept, field_name, domain)
 
         content = f"""---
 id: {filename}
@@ -320,11 +402,16 @@ aspect: {field_name}
 
 # {title}
 
-_TODO: Add content for {field_name} of {concept}._
+{aspect_content}
+
+## Atomic Claim
+
+{field_name} is useful for {concept} when it can be checked against a concrete
+example and then linked back to the central definition.
 
 ## Backlinks
 
-- [[{central_filename}|← {concept}]]
+- [[{central_filename}|{concept}]]
 
 ---
 
@@ -340,6 +427,66 @@ _Related to [[{central_filename}]]_
             metadata={
                 'type': 'radiating',
                 'aspect': field_name,
+                'domain': domain,
+            },
+        )
+
+    def _generate_storyline_note(
+        self,
+        concept: str,
+        domain: str,
+        central_filename: str,
+    ) -> ZettelNote:
+        """Generate a storyline note that turns the cluster into a learning path."""
+        slug = self._slugify(concept)
+        filename = f'zettel_{self.timestamp}_{slug}-storyline'
+        title = f'{concept} - Storyline'
+
+        content = f"""---
+id: {filename}
+created: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}
+modified: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}
+tags:
+  - {domain}
+  - zettel
+  - storyline
+type: zettel
+domain: {domain}
+concept: "{concept}"
+aspect: Storyline
+---
+
+# {title}
+
+Start with the motivating question for {concept}. Introduce the smallest
+example that makes the question concrete, then name the formal structure only
+after the need for it is visible.
+
+## Sequence
+
+1. State the problem in plain language.
+2. Show one concrete example or diagram.
+3. Introduce the notation and the core invariant.
+4. Connect the result to a neighboring concept or prior conversation.
+
+## Animation Hook
+
+The Manim scene should reveal the same sequence visually: object, operation,
+invariant, and conclusion.
+
+## Backlinks
+
+- [[{central_filename}|{concept}]]
+"""
+
+        return ZettelNote(
+            title=title,
+            filename=filename,
+            content=content,
+            tags=[domain, 'zettel', 'storyline'],
+            links=[central_filename],
+            metadata={
+                'type': 'storyline',
                 'domain': domain,
             },
         )
@@ -362,19 +509,24 @@ type: zettel
 connection_type: concept_bridge
 ---
 
-# {concept_a} ↔ {concept_b}
+# {concept_a} connects to {concept_b}
 
-_How do these concepts connect?_
+This note records why {concept_a} and {concept_b} belong in the same local map.
 
-## {concept_a} → {concept_b}
+## {concept_a} to {concept_b}
 
-_TODO: Describe how {concept_a} leads to or informs {concept_b}._
+Ask which structure in {concept_a} is reused by {concept_b}: a definition, a
+calculation pattern, an invariant, or a limiting process.
 
-## {concept_b} → {concept_a}
+## {concept_b} to {concept_a}
 
-_TODO: Describe how {concept_b} relates back to {concept_a}._
+Use {concept_b} as a check on {concept_a}. If the connection is real, an
+example or counterexample from {concept_b} should clarify the scope of
+{concept_a}.
 
 ## Shared Structure
 
-_TODO: What structural similarities exist?_
+Both notes should identify objects, transformations, and invariants. Keep this
+bridge only if it helps move between the two concepts during problem solving or
+explanation.
 """

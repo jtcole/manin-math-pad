@@ -156,6 +156,13 @@
     background: var(--assistant);
   }
 
+  .message.processing {
+    border-color: var(--accent);
+    background: var(--soft);
+    color: var(--accent-strong);
+    font-weight: 650;
+  }
+
   .artifact {
     width: min(760px, 100%);
     border: 1px solid var(--line);
@@ -172,6 +179,13 @@
     margin-bottom: 10px;
   }
 
+  .artifact-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
   .artifact-title {
     overflow-wrap: anywhere;
     font-weight: 700;
@@ -183,6 +197,32 @@
     max-height: 420px;
     border-radius: 6px;
     background: #101828;
+  }
+
+  .artifact-status {
+    display: grid;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .artifact-error {
+    border-left: 3px solid var(--warn);
+    color: var(--warn);
+    padding-left: 10px;
+    white-space: pre-wrap;
+  }
+
+  .scene-code {
+    max-height: 260px;
+    overflow: auto;
+    background: #101828;
+    color: #f8fafc;
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre;
   }
 
   .progress-line {
@@ -221,6 +261,21 @@
   details.zettel-tree summary {
     cursor: pointer;
     font-weight: 700;
+  }
+
+  .zettel-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    justify-content: space-between;
+    width: calc(100% - 12px);
+  }
+
+  .export-result {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 8px;
+    overflow-wrap: anywhere;
   }
 
   .note-tree {
@@ -462,6 +517,7 @@
   }
 
   async function loadSession(uid) {
+    clearPolls();
     const data = await api(`session/${uid}/`);
     state.currentSession = data;
     activeTitle.textContent = sessionTitle(data);
@@ -469,6 +525,11 @@
     renderMessages();
     renderArtifacts();
     scrollToBottom();
+  }
+
+  function clearPolls() {
+    state.polls.forEach((interval) => window.clearInterval(interval));
+    state.polls.clear();
   }
 
   function renderMessages() {
@@ -485,11 +546,15 @@
     messages.forEach((message) => appendMessage(message.role, message.content));
   }
 
-  function appendMessage(role, content) {
+  function appendMessage(role, content, options = {}) {
     const node = document.createElement("div");
     node.className = `message ${role}`;
+    if (options.processing) {
+      node.classList.add("processing");
+    }
     node.textContent = content;
     messageStream.appendChild(node);
+    scrollToBottom();
     return node;
   }
 
@@ -515,28 +580,88 @@
     const card = existing || document.createElement("article");
     card.className = "artifact";
     card.dataset.animationUid = animation.uid;
+    card.dataset.status = animation.status || "pending";
 
     const downloadUrl = apiPath(`animate/${animation.uid}/?download=1`);
     const status = animation.status || "pending";
-    const viewer = animation.video_url
-      ? `<video controls src="${animation.video_url}" ${animation.thumbnail_url ? `poster="${animation.thumbnail_url}"` : ""}></video>`
-      : `<div class="progress-line" aria-label="Rendering"></div>`;
-    const action = status === "completed"
-      ? `<a href="${downloadUrl}">Download</a>`
-      : `<span class="status-pill">${status}</span>`;
+    card.innerHTML = "";
 
-    card.innerHTML = `
-      <div class="artifact-header">
-        <div class="artifact-title"></div>
-        ${action}
-      </div>
-      ${viewer}
-    `;
-    card.querySelector(".artifact-title").textContent = animation.concept;
+    const header = document.createElement("div");
+    header.className = "artifact-header";
+
+    const title = document.createElement("div");
+    title.className = "artifact-title";
+    title.textContent = animation.concept;
+    header.appendChild(title);
+
+    const actions = document.createElement("div");
+    actions.className = "artifact-actions";
+    const statusPill = document.createElement("span");
+    statusPill.className = "status-pill";
+    statusPill.textContent = status;
+    actions.appendChild(statusPill);
+
+    if (status === "completed") {
+      const download = document.createElement("a");
+      download.href = downloadUrl;
+      download.textContent = "Download";
+      actions.appendChild(download);
+    }
+
+    if (status === "failed") {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = "Retry";
+      retry.addEventListener("click", () => retryAnimation(animation.concept));
+      actions.appendChild(retry);
+    }
+
+    header.appendChild(actions);
+    card.appendChild(header);
+
+    if (status === "completed" && animation.video_url) {
+      const video = document.createElement("video");
+      video.controls = true;
+      video.src = animation.video_url;
+      if (animation.thumbnail_url) {
+        video.poster = animation.thumbnail_url;
+      }
+      card.appendChild(video);
+    } else if (status === "failed") {
+      const error = document.createElement("div");
+      error.className = "artifact-error";
+      error.textContent = animation.error || "Rendering failed.";
+      card.appendChild(error);
+    } else {
+      const statusBody = document.createElement("div");
+      statusBody.className = "artifact-status";
+      const progress = document.createElement("div");
+      progress.className = "progress-line";
+      progress.setAttribute("aria-label", `Animation ${status}`);
+      const message = document.createElement("span");
+      message.textContent =
+        status === "pending" ? "Queued for rendering." : "Rendering in progress.";
+      statusBody.appendChild(progress);
+      statusBody.appendChild(message);
+      card.appendChild(statusBody);
+    }
+
+    if (animation.scene_code) {
+      const codeDetails = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "Scene code";
+      const code = document.createElement("pre");
+      code.className = "scene-code";
+      code.textContent = animation.scene_code;
+      codeDetails.appendChild(summary);
+      codeDetails.appendChild(code);
+      card.appendChild(codeDetails);
+    }
 
     if (!existing) {
       messageStream.appendChild(card);
     }
+    scrollToBottom();
   }
 
   function renderZettel(cluster) {
@@ -547,14 +672,33 @@
     details.dataset.zettelUid = cluster.uid;
 
     const notes = cluster.notes || [];
-    details.innerHTML = `
-      <summary></summary>
-      <ol class="note-tree"></ol>
-    `;
-    details.querySelector("summary").textContent =
-      `${cluster.topic} - ${notes.length || cluster.note_count || 0} notes`;
+    details.innerHTML = "";
 
-    const list = details.querySelector(".note-tree");
+    const summary = document.createElement("summary");
+    summary.textContent = `${cluster.topic} - ${notes.length || cluster.note_count || 0} notes`;
+    details.appendChild(summary);
+
+    const controls = document.createElement("div");
+    controls.className = "artifact-header";
+    const title = document.createElement("div");
+    title.className = "artifact-title";
+    title.textContent = "Zettel cluster";
+    const exportButton = document.createElement("button");
+    exportButton.type = "button";
+    exportButton.textContent = "Export to Vault";
+    exportButton.addEventListener("click", () => exportZettel(cluster.uid));
+    controls.appendChild(title);
+    controls.appendChild(exportButton);
+    details.appendChild(controls);
+
+    const list = document.createElement("ol");
+    list.className = "note-tree";
+    details.appendChild(list);
+
+    const exportResult = document.createElement("div");
+    exportResult.className = "export-result";
+    details.appendChild(exportResult);
+
     notes.forEach((note) => {
       const item = document.createElement("li");
       const title = document.createElement("strong");
@@ -570,6 +714,7 @@
     if (!existing) {
       messageStream.appendChild(details);
     }
+    scrollToBottom();
   }
 
   async function pollAnimation(uid) {
@@ -577,7 +722,7 @@
       return;
     }
 
-    const interval = window.setInterval(async () => {
+    const tick = async () => {
       try {
         const animation = await api(`animate/${uid}/`);
         mergeAnimation(animation);
@@ -592,9 +737,11 @@
         state.polls.delete(uid);
         setError(error.message);
       }
-    }, 3000);
+    };
 
+    const interval = window.setInterval(tick, 3000);
     state.polls.set(uid, interval);
+    await tick();
   }
 
   function mergeAnimation(animation) {
@@ -629,6 +776,48 @@
     const cluster = await api(`zettel/${uid}/`);
     mergeZettel(cluster);
     renderZettel(cluster);
+  }
+
+  async function retryAnimation(concept) {
+    if (!state.currentSession) {
+      return;
+    }
+
+    setError("");
+    queueStatus.textContent = "Queued";
+    const animation = await api("animate/", {
+      method: "POST",
+      body: JSON.stringify({
+        session_uid: state.currentSession.uid,
+        concept,
+      }),
+    });
+    mergeAnimation(animation);
+    renderAnimation(animation);
+    pollAnimation(animation.uid);
+  }
+
+  async function exportZettel(uid) {
+    const details = document.querySelector(`[data-zettel-uid="${uid}"]`);
+    const resultLine = details ? details.querySelector(".export-result") : null;
+    if (resultLine) {
+      resultLine.textContent = "Exporting...";
+    }
+
+    try {
+      const payload = await api(`zettel/${uid}/export/`, {method: "POST"});
+      const created = payload.created_paths || [];
+      const skipped = payload.skipped_paths || [];
+      if (resultLine) {
+        resultLine.textContent =
+          `Created ${created.length}; skipped ${skipped.length}. ${payload.cluster_path || ""}`;
+      }
+    } catch (error) {
+      if (resultLine) {
+        resultLine.textContent = error.message;
+      }
+      setError(error.message);
+    }
   }
 
   function scrollToBottom() {
@@ -670,7 +859,7 @@
     sendButton.disabled = true;
     queueStatus.textContent = "Sending";
     appendMessage("user", message);
-    const pending = appendMessage("assistant", "...");
+    const pending = appendMessage("assistant", "Processing...", {processing: true});
     messageInput.value = "";
     scrollToBottom();
 
@@ -686,6 +875,7 @@
       });
 
       pending.textContent = data.message || "";
+      pending.classList.remove("processing");
       if (data.animation) {
         mergeAnimation(data.animation);
         renderAnimation(data.animation);
@@ -699,6 +889,7 @@
       await loadSession(state.currentSession.uid);
     } catch (error) {
       pending.textContent = "Request failed.";
+      pending.classList.remove("processing");
       queueStatus.textContent = "Error";
       setError(error.message);
     } finally {

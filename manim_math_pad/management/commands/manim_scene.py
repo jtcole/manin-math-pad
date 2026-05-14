@@ -89,4 +89,4 @@ class Command(BaseCommand):
 
     def _render_output_dir(self) -> Path:
         media_root = Path(getattr(settings, 'MEDIA_ROOT', '') or '/tmp/manim_math_pad_media')
-        return media_root / 'manin' / 'manual_renders'
+        return media_root / 'manim' / 'manual_renders'

@@ -70,7 +70,7 @@ class Command(BaseCommand):
         limit = options['limit']
         processed = 0
 
-        self.stdout.write('Starting Manin render queue worker')
+        self.stdout.write('Starting Manim render queue worker')
 
         while True:
             animation = self._claim_next_animation()
@@ -100,6 +100,7 @@ class Command(BaseCommand):
             if not animation:
                 return None
 
+            self._log_transition(animation, animation.status, 'generating')
             animation.status = 'generating'
             animation.error_message = ''
             animation.save(update_fields=['status', 'error_message'])
@@ -167,6 +168,7 @@ class Command(BaseCommand):
         metadata = animation.metadata or {}
         metadata['scene_name'] = scene_name
         animation.metadata = metadata
+        self._log_transition(animation, animation.status, 'rendering')
         animation.status = 'rendering'
         animation.save(update_fields=['metadata', 'status'])
 
@@ -174,6 +176,7 @@ class Command(BaseCommand):
         metadata = animation.metadata or {}
         metadata.update(result.metadata or {})
         animation.metadata = metadata
+        self._log_transition(animation, animation.status, 'completed')
         animation.status = 'completed'
         animation.error_message = ''
         animation.completed_at = timezone.now()
@@ -201,6 +204,7 @@ class Command(BaseCommand):
         existing_metadata = animation.metadata or {}
         existing_metadata.update(metadata)
         animation.metadata = existing_metadata
+        self._log_transition(animation, animation.status, 'failed')
         animation.status = 'failed'
         animation.error_message = (error_message or 'Unknown render failure')[:2000]
         animation.completed_at = timezone.now()
@@ -209,4 +213,9 @@ class Command(BaseCommand):
 
     def _render_output_dir(self) -> Path:
         media_root = Path(getattr(settings, 'MEDIA_ROOT', '') or '/tmp/manim_math_pad_media')
-        return media_root / 'manin' / 'render_queue'
+        return media_root / 'manim' / 'render_queue'
+
+    def _log_transition(self, animation: Animation, old_status: str, new_status: str) -> None:
+        message = f'Animation {animation.uid}: {old_status} -> {new_status}'
+        logger.info(message)
+        self.stdout.write(message)

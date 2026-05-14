@@ -1,12 +1,20 @@
 """Tests for Manim Math Pad engine components."""
 from __future__ import annotations
 
+import re
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
 from manim_math_pad.engine.scene_generator import (
     SCENE_TEMPLATES,
     GeneratedScene,
     LLMSceneGenerator,
     SceneGenerator,
 )
+from manim_math_pad.engine.renderer import ManimRenderer
+from manim_math_pad.engine.vault_exporter import VaultZettelExporter
 from manim_math_pad.engine.zettel_generator import ZettelGenerator
 
 
@@ -86,6 +94,50 @@ class LimitScene(Scene):
         code = LLMSceneGenerator.extract_python_code(response)
         assert code.startswith('from manim import *')
         assert 'class LimitScene' in code
+
+    def test_llm_extracts_python_code_block_with_optional_language_tag(self):
+        response = '''
+```python linenums
+from manim import *
+
+class OptionalTagScene(Scene):
+    def construct(self):
+        self.wait(1)
+```
+'''
+        code = LLMSceneGenerator.extract_python_code(response)
+        assert code.startswith('from manim import *')
+        assert 'class OptionalTagScene' in code
+
+    def test_llm_prompt_contains_catalog_and_few_shots(self):
+        llm = LLMSceneGenerator(model='unit-test-model')
+        prompt = llm._build_prompt(
+            'visualize eigenvectors',
+            context={},
+            scene_name='EigenvectorsScene',
+            domain='linear_algebra',
+        )
+
+        assert 'ThreeDScene' in prompt
+        assert 'ValueTracker' in prompt
+        assert 'Circumscribe' in prompt
+        assert 'camera.frame.animate.move_to' in prompt
+        assert 'Pythagorean theorem visual proof' in prompt
+        assert 'eigenvectors under a linear transformation' in prompt
+        assert 'Prefer Text() for plain labels' in prompt
+
+    def test_llm_temperature_reads_env(self, monkeypatch):
+        monkeypatch.setenv('MANIM_SCENE_TEMPERATURE', '0.7')
+        llm = LLMSceneGenerator(model='unit-test-model')
+
+        assert llm.temperature == 0.7
+
+    def test_llm_temperature_supports_legacy_misspelled_env(self, monkeypatch):
+        monkeypatch.delenv('MANIM_SCENE_TEMPERATURE', raising=False)
+        monkeypatch.setenv('MANIN_SCENE_TEMPERATURE', '0.6')
+        llm = LLMSceneGenerator(model='unit-test-model')
+
+        assert llm.temperature == 0.6
 
     def test_llm_validation_requires_construct_and_valid_python(self):
         valid = '''
@@ -192,6 +244,112 @@ class TestZettelGenerator:
         for note in cluster.notes:
             assert note.filename.startswith('zettel_')
             assert ' ' not in note.filename
+
+    def test_notes_are_populated_and_central_links_are_rendered(self):
+        cluster = self.gen.generate('derivative', session_context={'previous_concepts': ['limits']})
+
+        joined = '\n'.join(note.content for note in cluster.notes)
+        assert '_TODO' not in joined
+        assert '{{links}}' not in cluster.central_note.content
+        assert any(note.metadata.get('type') == 'storyline' for note in cluster.notes)
+        assert any(note.metadata.get('type') == 'connection' for note in cluster.notes)
+
+
+class TestManimRenderer:
+    """Test Manim CLI integration."""
+
+    def test_renderer_uses_manim_019_quality_and_verbosity_flags(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        commands = []
+
+        def fake_run(cmd, capture_output, text, timeout, cwd=None):
+            commands.append(cmd)
+            media_dir = Path(cwd) / 'media' / 'videos' / 'scene_job' / '480p15'
+            media_dir.mkdir(parents=True)
+            (media_dir / 'RenderedScene.mp4').write_bytes(b'video')
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+
+        monkeypatch.setattr('manim_math_pad.engine.renderer.subprocess.run', fake_run)
+        monkeypatch.setattr(ManimRenderer, '_create_thumbnail', lambda *args, **kwargs: None)
+
+        renderer = ManimRenderer(output_dir=tmp_path / 'out', quality='low_quality', fps=15)
+        result = renderer.render(
+            'from manim import *\n\nclass DemoScene(Scene):\n    def construct(self):\n        self.wait(1)\n',
+            'DemoScene',
+            job_uid='job',
+        )
+
+        assert result.success is True
+        cmd = commands[0]
+        assert cmd[cmd.index('-q') + 1] == 'l'
+        assert cmd[cmd.index('-v') + 1] == 'WARNING'
+        assert '--verbose' not in cmd
+        assert '-l' not in cmd
+
+
+class TestVaultZettelExporter:
+    """Test exporting generated zettel clusters to Markdown files."""
+
+    def test_exports_cluster_notes_with_required_frontmatter(self, tmp_path):
+        cluster = SimpleNamespace(
+            uid=uuid.uuid4(),
+            status='completed',
+            topic='Matrix Multiplication',
+            created_at=datetime(2026, 5, 14, 12, 30, tzinfo=timezone.utc),
+            zettel_data={
+                'domain': 'linear_algebra',
+                'notes': [
+                    {
+                        'title': 'Matrix Multiplication',
+                        'filename': 'zettel_20260514_matrix-multiplication',
+                        'content': '---\nid: old-id\n---\n# Matrix Multiplication\n\nBody.',
+                        'tags': ['legacy'],
+                    }
+                ],
+            },
+        )
+        exporter = VaultZettelExporter(vault_path=tmp_path)
+
+        result = exporter.export_cluster(cluster)
+
+        assert result.note_count == 1
+        assert len(result.created_paths) == 1
+        written = result.created_paths[0].read_text(encoding='utf-8')
+        assert re.search(r'id: [0-9a-f-]{36}', written)
+        assert 'created: 2026-05-14T12:30:00+00:00' in written
+        assert 'tags: [math, linear_algebra, zettel]' in written
+        assert 'type: zettel' in written
+        assert 'old-id' not in written
+        assert '# Matrix Multiplication' in written
+
+    def test_export_skips_existing_files(self, tmp_path):
+        cluster = SimpleNamespace(
+            uid=uuid.uuid4(),
+            status='completed',
+            topic='Limits',
+            created_at=datetime(2026, 5, 14, tzinfo=timezone.utc),
+            zettel_data={
+                'domain': 'calculus',
+                'notes': [
+                    {
+                        'title': 'Limits',
+                        'filename': 'zettel_20260514_limits',
+                        'content': '# Limits\n',
+                    }
+                ],
+            },
+        )
+        exporter = VaultZettelExporter(vault_path=tmp_path)
+
+        first = exporter.export_cluster(cluster)
+        second = exporter.export_cluster(cluster)
+
+        assert len(first.created_paths) == 1
+        assert second.created_paths == []
+        assert second.skipped_paths == first.created_paths
 
 
 class TestZettelClusterIntegration:

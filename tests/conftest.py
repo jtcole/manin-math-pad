@@ -1,6 +1,8 @@
 """Django integration test fixtures and settings."""
 import django
+import pytest
 from django.conf import settings
+from django.core.management import call_command
 
 # Minimal Django settings for running tests without the full site
 DATABASES = {
@@ -39,3 +41,21 @@ if not settings.configured:
         SECRET_KEY='test-secret-key-manim-math-pad',
     )
     django.setup()
+
+
+@pytest.fixture
+def migrated_db(db):
+    """Create the in-memory SQLite schema for endpoint tests."""
+    call_command('migrate', verbosity=0, interactive=False)
+
+    from manim_math_pad.models import Animation, Message, Session, ZettelCluster
+
+    Animation.objects.all().delete()
+    Message.objects.all().delete()
+    ZettelCluster.objects.all().delete()
+    Session.objects.all().delete()
+    yield
+    Animation.objects.all().delete()
+    Message.objects.all().delete()
+    ZettelCluster.objects.all().delete()
+    Session.objects.all().delete()

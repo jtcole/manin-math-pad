@@ -35,6 +35,19 @@ class ManimRenderer:
     output is moved to the media storage location.
     """
 
+    QUALITY_FLAGS = {
+        'low_quality': 'l',
+        'medium_quality': 'm',
+        'high_quality': 'h',
+        'production_quality': 'p',
+        'fourk_quality': 'k',
+        'l': 'l',
+        'm': 'm',
+        'h': 'h',
+        'p': 'p',
+        'k': 'k',
+    }
+
     def __init__(
         self,
         output_dir: Path | str | None = None,
@@ -89,11 +102,13 @@ class ManimRenderer:
                 self.manim_cmd,
                 str(scene_file),
                 scene_name,
-                f'-{self.quality[0]}',  # -l, -m, -h, -p
+                '-q',
+                self._quality_flag(),
                 '--format', self.format,
                 '--fps', str(self.fps),
                 '--media_dir', str(tmpdir_path / 'media'),
-                '--verbose', 'WARNING',
+                '-v',
+                'WARNING',
             ]
 
             logger.info(f'Rendering Manim scene {scene_name} (job {job_uid})')
@@ -172,11 +187,16 @@ class ManimRenderer:
                 metadata={
                     'scene_name': scene_name,
                     'quality': self.quality,
+                    'quality_flag': self._quality_flag(),
                     'format': self.format,
                     'fps': self.fps,
                     'file_size_bytes': final_path.stat().st_size if final_path.exists() else 0,
                 },
             )
+
+    def _quality_flag(self) -> str:
+        """Return the Manim 0.19 quality flag for the configured quality name."""
+        return self.QUALITY_FLAGS.get(self.quality, self.quality[:1])
 
     def _create_thumbnail(self, video_path: Path, thumbnail_path: Path) -> Path | None:
         """Extract a still frame with ffmpeg when available."""

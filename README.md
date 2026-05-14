@@ -35,11 +35,14 @@ User → Chat API → Scene Generator → Manim Renderer → MP4/GIF
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/manim/session/` | Create chat session |
+| `GET` | `/api/manim/session/<uid>/export/` | Download transcript, scene code, videos, and zettel notes |
 | `POST` | `/api/manim/chat/` | Send message, get response |
 | `POST` | `/api/manim/animate/` | Generate animation for concept |
 | `GET` | `/api/manim/animate/<uid>/` | Check status / download video |
 | `POST` | `/api/manim/zettel/` | Generate zettel cluster |
 | `GET` | `/api/manim/zettel/<uid>/` | Get cluster details |
+| `POST` | `/api/manim/zettel/<uid>/export/` | Export one completed cluster to the vault |
+| `POST` | `/api/manim/zettel/export-all/` | Export all completed clusters for a session |
 
 ### Built-in Scene Templates
 
@@ -48,7 +51,7 @@ User → Chat API → Scene Generator → Manim Renderer → MP4/GIF
 - **Matrix Multiplication** — Element highlighting
 - **Fourier Series** — Square wave approximation
 
-More templates and LLM-driven generation coming in Phase 2.
+Novel concepts fall back to deterministic starter scenes unless LLM generation is enabled.
 
 ## Setup
 
@@ -101,8 +104,65 @@ urlpatterns = [
 Run migrations:
 
 ```bash
-python manage.py makemigrations manim_math_pad
 python manage.py migrate
+```
+
+The app ships with `manim_math_pad/migrations/0001_initial.py`; downstream sites should not
+need to run `makemigrations` for the package models.
+
+### Rendering
+
+Animation requests are queued by default. Run a worker in a second process to complete queued
+jobs:
+
+```bash
+python manage.py process_render_queue --once --quality low_quality
+python manage.py run_render_daemon --poll-interval 5 --quality low_quality
+```
+
+For local demos, render inline by setting an environment variable or request field:
+
+```bash
+MANIM_RENDER_MODE=inline python manage.py runserver
+```
+
+```json
+{
+  "session_uid": "...",
+  "concept": "euler identity",
+  "render_mode": "inline",
+  "quality": "low_quality"
+}
+```
+
+Useful render settings:
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `MANIM_RENDER_MODE` | `queue` | Use `inline` for local synchronous rendering |
+| `MANIM_RENDER_QUALITY` | `low_quality` in inline mode | Manim quality preset |
+| `MANIM_RENDER_FPS` | `15` in inline mode | Frames per second |
+| `MANIM_RENDER_TIMEOUT` | `120` | Render timeout in seconds |
+| `MANIM_CMD` | `manim` | Manim executable path |
+
+### LLM Scene Generation
+
+The chat answer layer is deterministic and works without external services. Scene generation
+uses built-in templates or deterministic placeholders unless LLM support is explicitly enabled:
+
+```bash
+MANIM_ENABLE_LLM=1 MANIM_SCENE_MODEL=gpt-4o-mini python manage.py runserver
+```
+
+Set `OPENAI_API_KEY` for OpenAI-compatible chat completions, or `OLLAMA_HOST` for an Ollama
+server.
+
+### Zettel Vault Export
+
+Completed zettel clusters can be exported to an Obsidian vault. Configure the target path with:
+
+```bash
+MANIM_VAULT_PATH=/home/cole/vscode_projects/cant_know/Pure\ Zettel
 ```
 
 ### As Git Submodule
