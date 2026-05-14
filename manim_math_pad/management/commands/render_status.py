@@ -1,4 +1,4 @@
-"""Report Manin Math Pad render queue status."""
+"""Report Manim Math Pad render queue status."""
 from __future__ import annotations
 
 import json
@@ -12,7 +12,7 @@ from ...models import Animation
 class Command(BaseCommand):
     """Show queued, active, completed, and failed render counts."""
 
-    help = 'Show Manin Math Pad animation render queue status.'
+    help = 'Show Manim Math Pad animation render queue status.'
 
     def add_arguments(self, parser):
         parser.add_argument('--json', action='store_true', help='Output machine-readable JSON.')

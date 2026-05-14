@@ -1,20 +1,20 @@
 """
-URL configuration for Manin Math Pad.
+URL configuration for Manim Math Pad.
 
 Routes:
-  /api/manin/session/       — create/get chat session
-  /api/manin/session/<uid>/ — get session messages and artifacts
-  /api/manin/chat/           — send message, get response
-  /api/manin/chat/           — GET serves browser chat page
-  /api/manin/animate/        — generate Manim animation for a concept
-  /api/manin/animate/<uid>/  — get animation status / download
-  /api/manin/zettel/         — generate Obsidian zettel cluster
-  /api/manin/zettel/<uid>/   — download zettel cluster
+  /api/manim/session/       — create/get chat session
+  /api/manim/session/<uid>/ — get session messages and artifacts
+  /api/manim/chat/           — send message, get response
+  /api/manim/chat/           — GET serves browser chat page
+  /api/manim/animate/        — generate Manim animation for a concept
+  /api/manim/animate/<uid>/  — get animation status / download
+  /api/manim/zettel/         — generate Obsidian zettel cluster
+  /api/manim/zettel/<uid>/   — download zettel cluster
 """
 from django.urls import path
 from . import views
 
-app_name = 'manin_math_pad'
+app_name = 'manim_math_pad'
 
 urlpatterns = [
     path('session/', views.SessionView.as_view(), name='session'),

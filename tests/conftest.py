@@ -13,7 +13,7 @@ DATABASES = {
 INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.auth',
-    'manin_math_pad',
+    'manim_math_pad',
 ]
 
 ROOT_URLCONF = 'tests.test_urls'
@@ -35,7 +35,7 @@ if not settings.configured:
         ROOT_URLCONF=ROOT_URLCONF,
         DEFAULT_AUTO_FIELD=DEFAULT_AUTO_FIELD,
         TEMPLATES=TEMPLATES,
-        MEDIA_ROOT='/tmp/manin_math_pad_test_media',
-        SECRET_KEY='test-secret-key-manin-math-pad',
+        MEDIA_ROOT='/tmp/manim_math_pad_test_media',
+        SECRET_KEY='test-secret-key-manim-math-pad',
     )
     django.setup()

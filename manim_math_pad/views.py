@@ -1,4 +1,4 @@
-"""Manin Math Pad — API Views."""
+"""Manim Math Pad — API Views."""
 from __future__ import annotations
 
 import json
@@ -40,7 +40,7 @@ def _chat_page_context(request) -> dict:
     elif path.endswith('/chat-ui/'):
         api_base = path.removesuffix('chat-ui/')
     else:
-        api_base = '/api/manin/'
+        api_base = '/api/manim/'
     return {'api_base': api_base}
 
 
@@ -126,7 +126,7 @@ class ChatPageView(View):
     """Serve the browser chat interface."""
 
     def get(self, request):
-        return render(request, 'manin_math_pad/chat.html', _chat_page_context(request))
+        return render(request, 'manim_math_pad/chat.html', _chat_page_context(request))
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -135,7 +135,7 @@ class ChatView(View):
 
     def get(self, request):
         """Serve the chat page when accessed from a browser."""
-        return render(request, 'manin_math_pad/chat.html', _chat_page_context(request))
+        return render(request, 'manim_math_pad/chat.html', _chat_page_context(request))
 
     def post(self, request):
         """Send a message to the math pad and get a response."""
@@ -443,7 +443,7 @@ def _animation_payload(
 
     if animation.status == 'completed':
         data['duration_seconds'] = animation.duration_seconds
-        data['download_url'] = download_url or f'/api/manin/animate/{animation.uid}/?download=1'
+        data['download_url'] = download_url or f'/api/manim/animate/{animation.uid}/?download=1'
 
     if include_urls:
         video_url = _file_url(animation.video_file)

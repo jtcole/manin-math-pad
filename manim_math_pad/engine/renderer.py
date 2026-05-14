@@ -45,7 +45,7 @@ class ManimRenderer:
     ):
         """
         Args:
-            output_dir: Directory for rendered output. Defaults to MEDIA_ROOT/manin/
+            output_dir: Directory for rendered output. Defaults to MEDIA_ROOT/manim/
             quality: Manim quality preset.
             format: Output format (mp4, gif)
             fps: Frames per second

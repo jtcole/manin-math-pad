@@ -1,5 +1,5 @@
 """
-Manin Math Pad — Core Engine.
+Manim Math Pad — Core Engine.
 
 The engine module handles:
   - scene_generator: LLM → Manim Python code generation

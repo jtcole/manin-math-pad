@@ -1,5 +1,5 @@
 """
-Manin Math Pad — Models.
+Manim Math Pad — Models.
 
 Session: a chat session between a user and the math pad.
 Message: individual messages within a session.
@@ -14,7 +14,7 @@ from django.utils import timezone
 
 
 class Session(models.Model):
-    """A chat session with the Manin Math Pad."""
+    """A chat session with the Manim Math Pad."""
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

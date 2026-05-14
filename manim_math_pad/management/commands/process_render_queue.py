@@ -1,4 +1,4 @@
-"""Render pending Manin Math Pad animations."""
+"""Render pending Manim Math Pad animations."""
 from __future__ import annotations
 
 import logging
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class Command(BaseCommand):
     """Poll pending Animation rows and render them with Manim."""
 
-    help = 'Process pending Manin Math Pad animation render jobs.'
+    help = 'Process pending Manim Math Pad animation render jobs.'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -208,5 +208,5 @@ class Command(BaseCommand):
         self.stderr.write(self.style.ERROR(f'Failed animation {animation.uid}: {error_message}'))
 
     def _render_output_dir(self) -> Path:
-        media_root = Path(getattr(settings, 'MEDIA_ROOT', '') or '/tmp/manin_math_pad_media')
+        media_root = Path(getattr(settings, 'MEDIA_ROOT', '') or '/tmp/manim_math_pad_media')
         return media_root / 'manin' / 'render_queue'

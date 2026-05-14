@@ -1,4 +1,4 @@
-# Manin Math Pad
+# Manim Math Pad
 
 > _"The product of mathematical thinking is mathematical understanding, not theorems."_ — Yuri Manin
 
@@ -34,12 +34,12 @@ User → Chat API → Scene Generator → Manim Renderer → MP4/GIF
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/manin/session/` | Create chat session |
-| `POST` | `/api/manin/chat/` | Send message, get response |
-| `POST` | `/api/manin/animate/` | Generate animation for concept |
-| `GET` | `/api/manin/animate/<uid>/` | Check status / download video |
-| `POST` | `/api/manin/zettel/` | Generate zettel cluster |
-| `GET` | `/api/manin/zettel/<uid>/` | Get cluster details |
+| `POST` | `/api/manim/session/` | Create chat session |
+| `POST` | `/api/manim/chat/` | Send message, get response |
+| `POST` | `/api/manim/animate/` | Generate animation for concept |
+| `GET` | `/api/manim/animate/<uid>/` | Check status / download video |
+| `POST` | `/api/manim/zettel/` | Generate zettel cluster |
+| `GET` | `/api/manim/zettel/<uid>/` | Get cluster details |
 
 ### Built-in Scene Templates
 
@@ -68,7 +68,7 @@ pip install manim
 ### Install
 
 ```bash
-cd manin-math-pad
+cd manim-math-pad
 pip install -e ".[dev]"
 ```
 
@@ -85,7 +85,7 @@ Add to your site's `INSTALLED_APPS`:
 ```python
 INSTALLED_APPS = [
     ...
-    'manin_math_pad',
+    'manim_math_pad',
 ]
 ```
 
@@ -94,14 +94,14 @@ Add to your site's `urls.py`:
 ```python
 urlpatterns = [
     ...
-    path('api/manin/', include('manin_math_pad.urls')),
+    path('api/manim/', include('manim_math_pad.urls')),
 ]
 ```
 
 Run migrations:
 
 ```bash
-python manage.py makemigrations manin_math_pad
+python manage.py makemigrations manim_math_pad
 python manage.py migrate
 ```
 
@@ -109,7 +109,7 @@ python manage.py migrate
 
 ```bash
 cd your-site-repo
-git submodule add https://github.com/jtcole/manin-math-pad.git manin_math_pad
+git submodule add https://github.com/jtcole/manim-math-pad.git manim_math_pad
 git submodule update --init --recursive
 ```
 
@@ -117,7 +117,7 @@ git submodule update --init --recursive
 
 ### Adding Scene Templates
 
-Edit `manin_math_pad/engine/scene_generator.py` and add to `SCENE_TEMPLATES`:
+Edit `manim_math_pad/engine/scene_generator.py` and add to `SCENE_TEMPLATES`:
 
 ```python
 SCENE_TEMPLATES['your-concept'] = {

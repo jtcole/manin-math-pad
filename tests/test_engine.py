@@ -1,13 +1,13 @@
-"""Tests for Manin Math Pad engine components."""
+"""Tests for Manim Math Pad engine components."""
 from __future__ import annotations
 
-from manin_math_pad.engine.scene_generator import (
+from manim_math_pad.engine.scene_generator import (
     SCENE_TEMPLATES,
     GeneratedScene,
     LLMSceneGenerator,
     SceneGenerator,
 )
-from manin_math_pad.engine.zettel_generator import ZettelGenerator
+from manim_math_pad.engine.zettel_generator import ZettelGenerator
 
 
 class TestSceneGenerator:

@@ -88,5 +88,5 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(result.error_message))
 
     def _render_output_dir(self) -> Path:
-        media_root = Path(getattr(settings, 'MEDIA_ROOT', '') or '/tmp/manin_math_pad_media')
+        media_root = Path(getattr(settings, 'MEDIA_ROOT', '') or '/tmp/manim_math_pad_media')
         return media_root / 'manin' / 'manual_renders'
