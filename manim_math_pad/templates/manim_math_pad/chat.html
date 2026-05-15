@@ -332,10 +332,44 @@
     background: var(--accent-strong);
   }
 
+  .send-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .cancel-button {
+    border-color: var(--warn);
+    background: transparent;
+    color: var(--warn);
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+
+  .cancel-button:hover {
+    background: var(--warn);
+    color: #fff;
+  }
+
   .toolbar {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    align-items: center;
+  }
+
+  .model-select {
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    font-size: 13px;
+    color: var(--text);
+    min-width: 180px;
+  }
+
+  .model-select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
 
   .toggle-button {
@@ -410,6 +444,7 @@
         <button class="toggle-button" id="zettelToggle" type="button" aria-pressed="false">
           Zettel
         </button>
+        <select class="model-select" id="modelSelect" aria-label="AI model"></select>
       </div>
       <div class="input-row">
         <textarea id="messageInput" name="message" placeholder="Describe a math concept"></textarea>
@@ -428,7 +463,19 @@
     animate: true,
     zettel: false,
     polls: new Map(),
+    sending: false,
+    model: null,  // selected model id
   };
+
+  // Available models — grouped by provider for the dropdown
+  const AVAILABLE_MODELS = [
+    { id: "gpt-5.4", label: "GPT 5.4 (OpenAI)", group: "OpenAI" },
+    { id: "gpt-4o", label: "GPT 4o (OpenAI)", group: "OpenAI" },
+    { id: "gpt-4o-mini", label: "GPT 4o-mini (OpenAI)", group: "OpenAI" },
+    { id: "deepseek-v4-pro:cloud", label: "DeepSeek V4 Pro (Ollama)", group: "Ollama" },
+    { id: "glm-5.1:cloud", label: "GLM 5.1 (Ollama)", group: "Ollama" },
+    { id: "kimi-k2.6:cloud", label: "Kimi K2.6 (Ollama)", group: "Ollama" },
+  ];
 
   const sessionList = document.getElementById("sessionList");
   const sessionCount = document.getElementById("sessionCount");
@@ -440,6 +487,7 @@
   const sendButton = document.getElementById("sendButton");
   const animateToggle = document.getElementById("animateToggle");
   const zettelToggle = document.getElementById("zettelToggle");
+  const modelSelect = document.getElementById("modelSelect");
 
   function apiPath(path) {
     return `${API_BASE}${path}`;
@@ -584,6 +632,8 @@
 
     const downloadUrl = apiPath(`animate/${animation.uid}/?download=1`);
     const status = animation.status || "pending";
+    const isTerminal = ["completed", "failed", "canceled"].includes(status);
+    const isActive = ["pending", "generating", "rendering"].includes(status);
     card.innerHTML = "";
 
     const header = document.createElement("div");
@@ -616,6 +666,18 @@
       actions.appendChild(retry);
     }
 
+    if (isActive) {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "cancel-button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", (e) => {
+        e.stopPropagation();
+        cancelAnimation(animation.uid);
+      });
+      actions.appendChild(cancel);
+    }
+
     header.appendChild(actions);
     card.appendChild(header);
 
@@ -627,12 +689,12 @@
         video.poster = animation.thumbnail_url;
       }
       card.appendChild(video);
-    } else if (status === "failed") {
+    } else if (status === "failed" || status === "canceled") {
       const error = document.createElement("div");
       error.className = "artifact-error";
-      error.textContent = animation.error || "Rendering failed.";
+      error.textContent = animation.error || "Canceled.";
       card.appendChild(error);
-    } else {
+    } else if (isActive) {
       const statusBody = document.createElement("div");
       statusBody.className = "artifact-status";
       const progress = document.createElement("div");
@@ -728,7 +790,7 @@
         mergeAnimation(animation);
         renderAnimation(animation);
         queueStatus.textContent = animation.status;
-        if (["completed", "failed"].includes(animation.status)) {
+        if (["completed", "failed", "canceled"].includes(animation.status)) {
           window.clearInterval(interval);
           state.polls.delete(uid);
         }
@@ -776,6 +838,24 @@
     const cluster = await api(`zettel/${uid}/`);
     mergeZettel(cluster);
     renderZettel(cluster);
+  }
+
+  async function cancelAnimation(uid) {
+    try {
+      const animation = await api(`animate/${uid}/`, {
+        method: "PATCH",
+        body: JSON.stringify({status: "canceled"}),
+      });
+      mergeAnimation(animation);
+      renderAnimation(animation);
+      queueStatus.textContent = "Canceled";
+      if (state.polls.has(uid)) {
+        window.clearInterval(state.polls.get(uid));
+        state.polls.delete(uid);
+      }
+    } catch (error) {
+      setError(error.message);
+    }
   }
 
   async function retryAnimation(concept) {
@@ -829,6 +909,30 @@
     zettelToggle.setAttribute("aria-pressed", String(state.zettel));
   }
 
+  function populateModelSelect() {
+    modelSelect.innerHTML = "";
+    let currentGroup = null;
+    AVAILABLE_MODELS.forEach((m) => {
+      if (m.group !== currentGroup) {
+        const optgroup = document.createElement("optgroup");
+        optgroup.label = m.group;
+        modelSelect.appendChild(optgroup);
+        currentGroup = m.group;
+      }
+      const option = document.createElement("option");
+      option.value = m.id;
+      option.textContent = m.label;
+      if (m.id === state.model) {
+        option.selected = true;
+      }
+      modelSelect.lastChild.appendChild(option);
+    });
+  }
+
+  modelSelect.addEventListener("change", () => {
+    state.model = modelSelect.value;
+  });
+
   document.getElementById("newSessionButton").addEventListener("click", () => {
     createSession().catch((error) => setError(error.message));
   });
@@ -847,6 +951,10 @@
     event.preventDefault();
     setError("");
 
+    if (state.sending) {
+      return;
+    }
+
     const message = messageInput.value.trim();
     if (!message) {
       return;
@@ -856,6 +964,7 @@
       await createSession();
     }
 
+    state.sending = true;
     sendButton.disabled = true;
     queueStatus.textContent = "Sending";
     appendMessage("user", message);
@@ -871,6 +980,7 @@
           message,
           animate: state.animate,
           zettel: state.zettel,
+          model: state.model,
         }),
       });
 
@@ -892,14 +1002,18 @@
       pending.classList.remove("processing");
       queueStatus.textContent = "Error";
       setError(error.message);
+      sendButton.disabled = false;
+      state.sending = false;
     } finally {
       sendButton.disabled = false;
+      state.sending = false;
       messageInput.focus();
       scrollToBottom();
     }
   });
 
   updateToggles();
+  populateModelSelect();
   loadSessions(true).catch((error) => setError(error.message));
 </script>
 {% endblock %}

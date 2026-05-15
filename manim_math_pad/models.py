@@ -60,6 +60,7 @@ class Animation(models.Model):
         ('rendering', 'Rendering video'),
         ('completed', 'Completed'),
         ('failed', 'Failed'),
+        ('canceled', 'Canceled'),
     ]
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name='animations')

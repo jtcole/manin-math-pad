@@ -265,11 +265,11 @@ class ChatView(View):
 
         Message.objects.create(session=session, role='user', content=content)
 
-        chat_service = MathChatService()
+        chat_service = MathChatService(chat_model=body.get('model'))
         chat_turn = chat_service.respond(content, session.context)
         scene_gen = SceneGenerator(
             enable_llm=_scene_llm_enabled(body),
-            scene_model=body.get('scene_model'),
+            scene_model=body.get('model') or body.get('scene_model'),
         )
         zettel_gen = ZettelGenerator()
 
@@ -397,7 +397,7 @@ class AnimateView(View):
         artifact_context = MathChatService().artifact_context(session.context, concept)
         scene_gen = SceneGenerator(
             enable_llm=_scene_llm_enabled(body),
-            scene_model=body.get('scene_model'),
+            scene_model=body.get('model') or body.get('scene_model'),
         )
         generated = scene_gen.generate(concept, context=artifact_context)
 
@@ -415,7 +415,7 @@ class AnimateView(View):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class AnimationStatusView(View):
-    """Check animation status or download result."""
+    """Check animation status, download result, or cancel."""
 
     def get(self, request, uid):
         """Get animation status or download video."""
@@ -443,6 +443,28 @@ class AnimationStatusView(View):
             data['error'] = animation.error_message
 
         return JsonResponse(data)
+
+    def patch(self, request, uid):
+        """Update an animation (e.g., cancel)."""
+        body = _json_body(request)
+        try:
+            animation = Animation.objects.get(uid=uid)
+        except Animation.DoesNotExist:
+            return JsonResponse({'error': 'Animation not found'}, status=404)
+
+        new_status = body.get('status')
+        if new_status:
+            if new_status not in ['pending', 'canceled']:
+                return JsonResponse(
+                    {'error': f'Cannot set status to "{new_status}"'}, status=400
+                )
+            animation.status = new_status
+            if new_status == 'canceled':
+                animation.error_message = 'Canceled by user'
+                animation.completed_at = timezone.now()
+            animation.save()
+
+        return JsonResponse(_animation_payload(animation, include_urls=True))
 
 
 @method_decorator(csrf_exempt, name='dispatch')

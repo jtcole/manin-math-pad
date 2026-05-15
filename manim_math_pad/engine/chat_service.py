@@ -19,7 +19,7 @@ class ChatTurn:
 
 
 class MathChatService:
-    """Answer math prompts without requiring an external LLM."""
+    """Answer math prompts using cached explanations with LLM fallback."""
 
     KNOWN_EXPLANATIONS = {
         'derivative': (
@@ -49,8 +49,18 @@ class MathChatService:
         ),
     }
 
-    def __init__(self, scene_generator: SceneGenerator | None = None):
+    def __init__(self, scene_generator: SceneGenerator | None = None, enable_llm_chat: bool = True, chat_model: str | None = None):
         self.scene_generator = scene_generator or SceneGenerator(enable_llm=False)
+        self._llm_chat_enabled = enable_llm_chat
+        self._chat_model = chat_model
+        self._llm_chat: object | None = None
+
+    def _chat_llm(self):
+        """Lazy-init the LLM for chat responses."""
+        if self._llm_chat is None and self._llm_chat_enabled:
+            from .scene_generator import LLMSceneGenerator
+            self._llm_chat = LLMSceneGenerator(model=self._chat_model)
+        return self._llm_chat
 
     def respond(self, message: str, context: dict | None = None) -> ChatTurn:
         """Create an answer and update reusable session context."""
@@ -130,11 +140,16 @@ class MathChatService:
         if snippet:
             lead = snippet
         else:
-            lead = (
-                f'{concept.title()} is best understood by naming the objects involved, '
-                f'the operation or transformation acting on them, and the invariant or '
-                f'quantity you want to track.'
-            )
+            # Try LLM for a better explanation
+            llm_answer = self._try_llm_answer(message, concept, domain)
+            if llm_answer:
+                lead = llm_answer
+            else:
+                lead = (
+                    f'{concept.title()} is a topic in {domain_label}. '
+                    f'To understand it, clarify the objects involved, the operations or '
+                    f'transformations acting on them, and the invariants or quantities being tracked.'
+                )
 
         template_sentence = (
             'I also have a built-in Manim template for this concept.'
@@ -148,6 +163,28 @@ class MathChatService:
             f'The useful next step is to turn the idea into a small visual sequence: '
             f'first the object, then the operation, then the conclusion. {template_sentence}'
         )
+
+    def _try_llm_answer(self, message: str, concept: str, domain: str) -> str:
+        """Use the LLM for a concise math explanation, falling back gracefully."""
+        llm = self._chat_llm()
+        if llm is None:
+            return ''
+        try:
+            prompt = (
+                f'Give a 2-3 sentence explanation of "{concept}" (domain: {domain}). '
+                f'The user asked: "{message}". '
+                f'Be concise, accurate, and avoid markdown formatting. '
+                f'Write in plain text suitable for a chat response.'
+            )
+            response = llm._call_llm(prompt)
+            # Clean it up
+            response = re.sub(r'\*\*|__|###|##|#|```|`', '', response)
+            response = re.sub(r'\n{3,}', '\n\n', response).strip()
+            if len(response) < 20 or len(response) > 800:
+                return ''
+            return response
+        except Exception:
+            return ''
 
     def _known_explanation(self, concept: str) -> str:
         lowered = concept.lower()

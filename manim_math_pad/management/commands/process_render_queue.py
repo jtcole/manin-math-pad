@@ -110,8 +110,20 @@ class Command(BaseCommand):
         self.stdout.write(f'Processing animation {animation.uid}: {animation.concept}')
 
         try:
+            # Check if canceled before generating scene
+            animation.refresh_from_db()
+            if animation.status == 'canceled':
+                self.stdout.write(f'Skipped canceled animation {animation.uid}')
+                return
+
             scene_name = self._ensure_scene_code(animation, options.get('scene_model'))
             self._mark_rendering(animation, scene_name)
+
+            # Check if canceled before rendering
+            animation.refresh_from_db()
+            if animation.status == 'canceled':
+                self.stdout.write(f'Skipped canceled animation {animation.uid}')
+                return
 
             renderer = ManimRenderer(
                 output_dir=self._render_output_dir(),
