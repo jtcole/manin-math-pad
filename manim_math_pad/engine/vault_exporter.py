@@ -48,6 +48,7 @@ class VaultZettelExporter:
         domain = cluster.zettel_data.get('domain', 'general')
         cluster_path = self.vault_path / self._cluster_dir_name(cluster)
         cluster_path.mkdir(parents=True, exist_ok=True)
+        self._fix_ownership(cluster_path)
 
         result = VaultExportResult(
             cluster_uid=str(cluster.uid),
@@ -65,9 +66,42 @@ class VaultZettelExporter:
                 self._render_note(cluster=cluster, note=note, domain=domain),
                 encoding='utf-8',
             )
+            self._fix_ownership(target_path)
             result.created_paths.append(target_path)
 
         return result
+
+    def _fix_ownership(self, path: Path) -> None:
+        """Fix file/directory ownership and permissions to match vault owner.
+
+        When the Django process runs as a different user (e.g., www-data),
+        files created in the vault must still be readable and writable by
+        the vault owner so git operations don't fail with permission errors.
+        """
+        try:
+            vault_stat = self.vault_path.stat()
+            vault_uid = vault_stat.st_uid
+            vault_gid = vault_stat.st_gid
+        except OSError:
+            return
+
+        try:
+            if path.is_dir():
+                os.chown(path, vault_uid, vault_gid)
+                os.chmod(path, 0o775)
+            else:
+                os.chown(path, vault_uid, vault_gid)
+                os.chmod(path, 0o664)
+        except (PermissionError, OSError):
+            # Best effort — if the process can't chown, at least try to
+            # make files world-readable so git can still operate
+            try:
+                if path.is_dir():
+                    os.chmod(path, 0o777)
+                else:
+                    os.chmod(path, 0o666)
+            except OSError:
+                pass
 
     def _configured_vault_path(self) -> str | Path:
         value = os.environ.get('MANIM_VAULT_PATH')
