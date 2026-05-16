@@ -736,7 +736,15 @@ def _create_storyboard(
     body: dict,
 ) -> AnimationStoryboard:
     max_clips = _int_option(body, 'clip_count', _int_config('MANIM_STORYBOARD_MAX_CLIPS', 5))
-    generated = StoryboardGenerator(max_clips=max_clips).generate(concept, context=artifact_context)
+    target_clip_seconds = _int_option(
+        body,
+        'target_clip_seconds',
+        _int_config('MANIM_STORYBOARD_CLIP_SECONDS', 18),
+    )
+    generated = StoryboardGenerator(
+        max_clips=max_clips,
+        target_clip_seconds=target_clip_seconds,
+    ).generate(concept, context=artifact_context)
     storyboard = AnimationStoryboard.objects.create(
         session=session,
         concept=generated.concept,
@@ -762,13 +770,18 @@ def _create_storyboard(
             scene_code=clip.scene_code,
             status='pending',
             metadata={
-                'source': 'storyboard',
+                'source': 'pedagogical_storyboard',
                 'scene_name': clip.scene_name,
                 'storyboard_uid': str(storyboard.uid),
                 'clip_index': clip.index,
                 'clip_count': clip_count,
                 'clip_title': clip.title,
                 'clip_objective': clip.objective,
+                'clip_purpose': clip.purpose,
+                'visual_action': clip.visual_action,
+                'math_focus': clip.math_focus,
+                'learner_check': clip.learner_check,
+                'target_duration_seconds': clip.duration_seconds,
                 'generation': clip.metadata,
             },
         )
@@ -935,6 +948,7 @@ def _animation_payload(
         'source': (animation.metadata or {}).get('source'),
     }
     if animation.storyboard_id:
+        metadata = animation.metadata or {}
         data.update(
             {
                 'storyboard_uid': str(animation.storyboard.uid),
@@ -942,6 +956,11 @@ def _animation_payload(
                 'clip_count': animation.clip_count,
                 'clip_title': animation.clip_title,
                 'clip_summary': animation.clip_summary,
+                'clip_purpose': metadata.get('clip_purpose'),
+                'visual_action': metadata.get('visual_action'),
+                'math_focus': metadata.get('math_focus'),
+                'learner_check': metadata.get('learner_check'),
+                'target_duration_seconds': metadata.get('target_duration_seconds'),
             }
         )
 

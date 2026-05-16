@@ -240,6 +240,18 @@
     margin: 0 0 8px;
   }
 
+  .plan-list {
+    display: grid;
+    gap: 6px;
+    margin: 8px 0 10px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .plan-list b {
+    color: var(--text);
+  }
+
   .artifact-status {
     display: grid;
     gap: 10px;
@@ -721,6 +733,27 @@
       card.appendChild(summary);
     }
 
+    const metadata = storyboard.metadata || {};
+    const lesson = metadata.lesson_plan || {};
+    const plan = document.createElement("div");
+    plan.className = "plan-list";
+    [
+      ["Goal", lesson.learning_goal],
+      ["Target", metadata.target_duration_seconds ? `${metadata.target_duration_seconds}s total` : ""],
+      ["Guard", lesson.misconception],
+    ].forEach(([label, value]) => {
+      if (!value) {
+        return;
+      }
+      const row = document.createElement("div");
+      row.innerHTML = `<b>${label}:</b> `;
+      row.appendChild(document.createTextNode(value));
+      plan.appendChild(row);
+    });
+    if (plan.childElementCount) {
+      card.appendChild(plan);
+    }
+
     const clips = document.createElement("ol");
     clips.className = "storyboard-clips";
     card.appendChild(clips);
@@ -759,6 +792,27 @@
       summary.className = "clip-summary";
       summary.textContent = clip.clip_summary;
       item.appendChild(summary);
+    }
+
+    const plan = document.createElement("div");
+    plan.className = "plan-list";
+    [
+      ["Purpose", clip.clip_purpose],
+      ["Visual", clip.visual_action],
+      ["Math", clip.math_focus],
+      ["Check", clip.learner_check],
+      ["Target", clip.target_duration_seconds ? `${clip.target_duration_seconds}s` : ""],
+    ].forEach(([label, value]) => {
+      if (!value) {
+        return;
+      }
+      const row = document.createElement("div");
+      row.innerHTML = `<b>${label}:</b> `;
+      row.appendChild(document.createTextNode(value));
+      plan.appendChild(row);
+    });
+    if (plan.childElementCount) {
+      item.appendChild(plan);
     }
 
     if (clip.status === "completed" && clip.video_url) {

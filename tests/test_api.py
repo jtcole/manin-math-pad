@@ -69,7 +69,10 @@ def test_chat_can_queue_animation_and_create_zettel(migrated_db):
     payload = response.json()
     assert payload['storyboard']['status'] == 'pending'
     assert payload['storyboard']['clip_count'] >= 4
+    assert payload['storyboard']['metadata']['target_duration_seconds'] >= 70
     assert payload['storyboard']['clips'][0]['clip_index'] == 1
+    assert payload['storyboard']['clips'][0]['target_duration_seconds'] >= 16
+    assert payload['storyboard']['clips'][0]['learner_check']
     assert payload['animation']['status'] == 'pending'
     assert payload['animation']['storyboard_uid'] == payload['storyboard']['uid']
     assert payload['animation']['scene_code'].startswith('from manim import *')
@@ -99,8 +102,11 @@ def test_storyboard_endpoint_queues_connected_clip_jobs(migrated_db):
     assert payload['concept'] == 'derivative'
     assert payload['status'] == 'pending'
     assert payload['clip_count'] == 4
+    assert payload['metadata']['lesson_plan']['learning_goal']
+    assert payload['metadata']['target_duration_seconds'] >= 60
     assert [clip['clip_index'] for clip in payload['clips']] == [1, 2, 3, 4]
     assert all(clip['storyboard_uid'] == payload['uid'] for clip in payload['clips'])
+    assert all(clip['target_duration_seconds'] >= 18 for clip in payload['clips'])
 
     detail = client.get(f'/api/manim/session/{session_uid}/')
     assert detail.status_code == 200

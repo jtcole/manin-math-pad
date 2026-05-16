@@ -233,10 +233,18 @@ class TestStoryboardGenerator:
         assert storyboard.domain == 'calculus'
         assert len(storyboard.clips) >= 4
         assert 'limits' in storyboard.summary
-        assert storyboard.metadata['source'] == 'storyboard'
+        assert storyboard.metadata['source'] == 'pedagogical_storyboard'
+        assert storyboard.lesson_plan.learning_goal.startswith('Understand a derivative')
+        assert storyboard.target_duration_seconds >= 70
+        assert storyboard.metadata['lesson_plan']['misconception']
+        assert storyboard.metadata['storyboard_plan'][0]['learner_check']
         for index, clip in enumerate(storyboard.clips, start=1):
             assert clip.index == index
             assert f'Clip {index} of {len(storyboard.clips)}' in clip.scene_code
+            assert clip.duration_seconds >= 16
+            assert clip.visual_action
+            assert clip.math_focus
+            assert clip.learner_check
             assert 'class ' in clip.scene_code
             assert LLMSceneGenerator.extract_scene_name(clip.scene_code) == clip.scene_name
             compile(clip.scene_code, f'<storyboard:{index}>', 'exec')
