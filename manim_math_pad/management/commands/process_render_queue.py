@@ -60,6 +60,11 @@ class Command(BaseCommand):
             help='Manim executable path.',
         )
         parser.add_argument(
+            '--skip-storyboard-concat',
+            action='store_true',
+            help='Do not assemble completed storyboard clips into a combined MP4.',
+        )
+        parser.add_argument(
             '--scene-model',
             default=None,
             help='LLM model to use if an animation is missing scene code.',
@@ -143,7 +148,7 @@ class Command(BaseCommand):
                 self._mark_failed(animation, result.error_message, result.metadata or {})
                 return
 
-            self._mark_completed(animation, result)
+            self._mark_completed(animation, result, skip_storyboard_concat=options.get('skip_storyboard_concat', False))
             self.stdout.write(self.style.SUCCESS(f'Completed animation {animation.uid}'))
         except Exception as exc:
             logger.exception('Animation render failed for %s', animation.uid)
@@ -186,7 +191,12 @@ class Command(BaseCommand):
         animation.save(update_fields=['metadata', 'status'])
         self._sync_storyboard(animation)
 
-    def _mark_completed(self, animation: Animation, result) -> None:
+    def _mark_completed(
+        self,
+        animation: Animation,
+        result,
+        skip_storyboard_concat: bool = False,
+    ) -> None:
         metadata = animation.metadata or {}
         metadata.update(result.metadata or {})
         animation.metadata = metadata
@@ -214,6 +224,8 @@ class Command(BaseCommand):
 
         animation.save()
         self._sync_storyboard(animation)
+        if animation.storyboard_id and not skip_storyboard_concat:
+            self._assemble_storyboard(animation.storyboard)
 
     def _mark_failed(self, animation: Animation, error_message: str, metadata: dict) -> None:
         existing_metadata = animation.metadata or {}
@@ -230,6 +242,10 @@ class Command(BaseCommand):
     def _render_output_dir(self) -> Path:
         media_root = Path(getattr(settings, 'MEDIA_ROOT', '') or '/tmp/manim_math_pad_media')
         return media_root / 'manim' / 'render_queue'
+
+    def _storyboard_output_dir(self) -> Path:
+        media_root = Path(getattr(settings, 'MEDIA_ROOT', '') or '/tmp/manim_math_pad_media')
+        return media_root / 'manim' / 'storyboards'
 
     def _log_transition(self, animation: Animation, old_status: str, new_status: str) -> None:
         message = f'Animation {animation.uid}: {old_status} -> {new_status}'
@@ -266,3 +282,48 @@ class Command(BaseCommand):
             update_fields.append('completed_at')
         if update_fields:
             storyboard.save(update_fields=update_fields)
+
+    def _assemble_storyboard(self, storyboard) -> None:
+        storyboard.refresh_from_db()
+        clips = list(storyboard.clips.order_by('clip_index', 'created_at'))
+        if not clips or any(clip.status != 'completed' or not clip.video_file for clip in clips):
+            return
+
+        clip_paths = []
+        for clip in clips:
+            try:
+                clip_paths.append(Path(clip.video_file.path))
+            except (NotImplementedError, ValueError):
+                return
+
+        output_dir = self._storyboard_output_dir()
+        renderer = ManimRenderer(output_dir=output_dir)
+        result = renderer.concatenate_videos(
+            clip_paths,
+            output_dir / f'{storyboard.uid}.mp4',
+            thumbnail_path=output_dir / f'{storyboard.uid}.jpg',
+        )
+
+        metadata = storyboard.metadata or {}
+        assemblies = metadata.get('assemblies') or []
+        assembly = {
+            'status': 'completed' if result.success else 'failed',
+            'video_path': str(result.video_path) if result.video_path else '',
+            'thumbnail_path': str(result.thumbnail_path) if result.thumbnail_path else '',
+            'duration_seconds': result.duration_seconds,
+            'clip_count': len(clips),
+            'error': result.error_message,
+            'metadata': result.metadata or {},
+        }
+        metadata.update(
+            {
+                'combined_video_path': assembly['video_path'],
+                'combined_thumbnail_path': assembly['thumbnail_path'],
+                'combined_duration_seconds': assembly['duration_seconds'],
+                'combined_status': assembly['status'],
+                'combined_error': assembly['error'],
+                'assemblies': [*assemblies, assembly][-5:],
+            }
+        )
+        storyboard.metadata = metadata
+        storyboard.save(update_fields=['metadata'])

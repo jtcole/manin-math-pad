@@ -754,6 +754,29 @@
       card.appendChild(plan);
     }
 
+    if (storyboard.combined_video_url) {
+      const combined = document.createElement("div");
+      combined.className = "artifact-status";
+      const label = document.createElement("strong");
+      label.textContent = storyboard.duration_seconds
+        ? `Combined lesson video (${Math.round(storyboard.duration_seconds)}s)`
+        : "Combined lesson video";
+      const video = document.createElement("video");
+      video.controls = true;
+      video.src = storyboard.combined_video_url;
+      if (storyboard.combined_thumbnail_url) {
+        video.poster = storyboard.combined_thumbnail_url;
+      }
+      combined.appendChild(label);
+      combined.appendChild(video);
+      card.appendChild(combined);
+    } else if (storyboard.combined_error) {
+      const error = document.createElement("div");
+      error.className = "artifact-error";
+      error.textContent = storyboard.combined_error;
+      card.appendChild(error);
+    }
+
     const clips = document.createElement("ol");
     clips.className = "storyboard-clips";
     card.appendChild(clips);

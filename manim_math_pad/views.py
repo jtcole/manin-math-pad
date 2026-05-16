@@ -44,6 +44,22 @@ def _file_url(file_field) -> str | None:
         return None
 
 
+def _media_url_for_path(path_value: str | None) -> str | None:
+    if not path_value:
+        return None
+    try:
+        path = Path(path_value).resolve()
+        media_root = Path(getattr(settings, 'MEDIA_ROOT', '') or '').resolve()
+        relative = path.relative_to(media_root)
+    except (OSError, ValueError):
+        return None
+
+    media_url = str(getattr(settings, 'MEDIA_URL', '/media/') or '/media/')
+    if not media_url.endswith('/'):
+        media_url += '/'
+    return media_url + relative.as_posix()
+
+
 def _chat_page_context(request) -> dict:
     path = request.path
     if path.endswith('/chat/'):
@@ -232,6 +248,21 @@ class SessionExportView(View):
                             )
                     except OSError:
                         logger.warning('Could not include video for animation %s', animation.uid)
+
+            for storyboard in session.storyboards.order_by('created_at'):
+                metadata = storyboard.metadata or {}
+                combined_path = metadata.get('combined_video_path')
+                if not combined_path:
+                    continue
+                try:
+                    video_path = Path(combined_path)
+                    if video_path.exists():
+                        archive.writestr(
+                            f'storyboards/{storyboard.uid}{video_path.suffix or ".mp4"}',
+                            video_path.read_bytes(),
+                        )
+                except OSError:
+                    logger.warning('Could not include storyboard video for %s', storyboard.uid)
 
             for cluster in session.zettel_clusters.filter(status='completed').order_by('created_at'):
                 cluster_dir = f'zettel/{cluster.uid}'
@@ -839,7 +870,8 @@ def _cancel_storyboard(storyboard: AnimationStoryboard) -> AnimationStoryboard:
 def _storyboard_payload(storyboard: AnimationStoryboard, include_urls: bool = False) -> dict:
     storyboard = _sync_storyboard_status(storyboard)
     clips = list(storyboard.clips.order_by('clip_index', 'created_at'))
-    return {
+    metadata = storyboard.metadata or {}
+    data = {
         'uid': str(storyboard.uid),
         'concept': storyboard.concept,
         'status': storyboard.status,
@@ -847,12 +879,27 @@ def _storyboard_payload(storyboard: AnimationStoryboard, include_urls: bool = Fa
         'clip_count': len(clips),
         'created_at': storyboard.created_at.isoformat(),
         'completed_at': storyboard.completed_at.isoformat() if storyboard.completed_at else None,
-        'metadata': storyboard.metadata or {},
+        'metadata': metadata,
         'clips': [
             _animation_payload(clip, include_urls=include_urls)
             for clip in clips
         ],
     }
+    if include_urls:
+        combined_video_url = _media_url_for_path(metadata.get('combined_video_path'))
+        combined_thumbnail_url = _media_url_for_path(metadata.get('combined_thumbnail_path'))
+        if combined_video_url:
+            data['combined_video_url'] = combined_video_url
+            data['download_url'] = combined_video_url
+        if combined_thumbnail_url:
+            data['combined_thumbnail_url'] = combined_thumbnail_url
+    if metadata.get('combined_duration_seconds') is not None:
+        data['duration_seconds'] = metadata.get('combined_duration_seconds')
+    if metadata.get('combined_status'):
+        data['combined_status'] = metadata.get('combined_status')
+    if metadata.get('combined_error'):
+        data['combined_error'] = metadata.get('combined_error')
+    return data
 
 
 def _maybe_render_inline(animation: Animation, body: dict) -> Animation:

@@ -55,6 +55,7 @@ class ManimRenderer:
         format: str = 'mp4',
         fps: int = 30,
         manim_cmd: str = 'manim',
+        create_thumbnails: bool = True,
     ):
         """
         Args:
@@ -69,6 +70,7 @@ class ManimRenderer:
         self.format = format
         self.fps = fps
         self.manim_cmd = manim_cmd
+        self.create_thumbnails = create_thumbnails
 
     def render(
         self,
@@ -170,10 +172,11 @@ class ManimRenderer:
                 dest_video.write_bytes(source_video.read_bytes())
                 final_path = dest_video
 
-                thumbnail_path = self._create_thumbnail(
-                    final_path,
-                    self.output_dir / f'{job_uid}.jpg',
-                )
+                if self.create_thumbnails:
+                    thumbnail_path = self._create_thumbnail(
+                        final_path,
+                        self.output_dir / f'{job_uid}.jpg',
+                    )
             else:
                 final_path = source_video
 
@@ -183,7 +186,7 @@ class ManimRenderer:
                 success=True,
                 video_path=final_path,
                 thumbnail_path=thumbnail_path,
-                duration_seconds=None,  # TODO: probe with ffprobe
+                duration_seconds=self._probe_duration(final_path),
                 metadata={
                     'scene_name': scene_name,
                     'quality': self.quality,
@@ -193,6 +196,82 @@ class ManimRenderer:
                     'file_size_bytes': final_path.stat().st_size if final_path.exists() else 0,
                 },
             )
+
+    def concatenate_videos(
+        self,
+        video_paths: list[Path],
+        output_path: Path,
+        thumbnail_path: Path | None = None,
+        timeout: int = 120,
+    ) -> RenderResult:
+        """Concatenate rendered clips into one MP4 using ffmpeg."""
+        existing_paths = [path for path in video_paths if path.exists()]
+        if len(existing_paths) != len(video_paths):
+            return RenderResult(
+                success=False,
+                error_message='Cannot concatenate clips because one or more videos are missing',
+                metadata={'input_count': len(video_paths), 'found_count': len(existing_paths)},
+            )
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='manim_concat_') as tmpdir:
+            concat_file = Path(tmpdir) / 'clips.txt'
+            concat_file.write_text(
+                ''.join(f"file '{path.as_posix()}'\n" for path in existing_paths),
+                encoding='utf-8',
+            )
+            cmd = [
+                'ffmpeg',
+                '-y',
+                '-loglevel',
+                'error',
+                '-f',
+                'concat',
+                '-safe',
+                '0',
+                '-i',
+                str(concat_file),
+                '-c',
+                'copy',
+                str(output_path),
+            ]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            except FileNotFoundError:
+                return RenderResult(
+                    success=False,
+                    error_message='ffmpeg is required to concatenate storyboard clips',
+                )
+            except subprocess.TimeoutExpired:
+                return RenderResult(
+                    success=False,
+                    error_message='ffmpeg timed out while concatenating storyboard clips',
+                )
+
+        if result.returncode != 0 or not output_path.exists():
+            return RenderResult(
+                success=False,
+                error_message=(
+                    result.stderr or result.stdout or f'ffmpeg exited {result.returncode}'
+                )[:2000],
+            )
+
+        final_thumbnail = None
+        if thumbnail_path and self.create_thumbnails:
+            final_thumbnail = self._create_thumbnail(output_path, thumbnail_path)
+
+        return RenderResult(
+            success=True,
+            video_path=output_path,
+            thumbnail_path=final_thumbnail,
+            duration_seconds=self._probe_duration(output_path),
+            metadata={
+                'render_mode': 'storyboard_concat',
+                'clip_count': len(existing_paths),
+                'format': self.format,
+                'file_size_bytes': output_path.stat().st_size if output_path.exists() else 0,
+            },
+        )
 
     def _quality_flag(self) -> str:
         """Return the Manim 0.19 quality flag for the configured quality name."""
@@ -229,3 +308,26 @@ class ManimRenderer:
             return None
 
         return thumbnail_path
+
+    def _probe_duration(self, video_path: Path) -> float | None:
+        """Return video duration in seconds when ffprobe is available."""
+        cmd = [
+            'ffprobe',
+            '-v',
+            'error',
+            '-show_entries',
+            'format=duration',
+            '-of',
+            'default=noprint_wrappers=1:nokey=1',
+            str(video_path),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode != 0:
+            return None
+        try:
+            return float(result.stdout.strip())
+        except ValueError:
+            return None

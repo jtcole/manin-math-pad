@@ -338,6 +338,8 @@ class TestManimRenderer:
 
         def fake_run(cmd, capture_output, text, timeout, cwd=None):
             commands.append(cmd)
+            if cmd[0] == 'ffprobe':
+                return SimpleNamespace(returncode=0, stdout='1.0\n', stderr='')
             media_dir = Path(cwd) / 'media' / 'videos' / 'scene_job' / '480p15'
             media_dir.mkdir(parents=True)
             (media_dir / 'RenderedScene.mp4').write_bytes(b'video')
@@ -359,6 +361,41 @@ class TestManimRenderer:
         assert cmd[cmd.index('-v') + 1] == 'WARNING'
         assert '--verbose' not in cmd
         assert '-l' not in cmd
+
+    def test_renderer_concatenates_storyboard_clip_videos(self, monkeypatch, tmp_path):
+        commands = []
+
+        def fake_run(cmd, capture_output, text, timeout, cwd=None):
+            commands.append(cmd)
+            if cmd[0] == 'ffmpeg':
+                output_path = Path(cmd[-1])
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(b'combined-video')
+                return SimpleNamespace(returncode=0, stdout='', stderr='')
+            if cmd[0] == 'ffprobe':
+                return SimpleNamespace(returncode=0, stdout='42.25\n', stderr='')
+            return SimpleNamespace(returncode=1, stdout='', stderr='unexpected command')
+
+        monkeypatch.setattr('manim_math_pad.engine.renderer.subprocess.run', fake_run)
+        monkeypatch.setattr(ManimRenderer, '_create_thumbnail', lambda *args, **kwargs: None)
+        clip_a = tmp_path / 'clip-a.mp4'
+        clip_b = tmp_path / 'clip-b.mp4'
+        clip_a.write_bytes(b'a')
+        clip_b.write_bytes(b'b')
+
+        renderer = ManimRenderer(output_dir=tmp_path / 'out', quality='low_quality')
+        result = renderer.concatenate_videos(
+            [clip_a, clip_b],
+            tmp_path / 'out' / 'storyboard.mp4',
+            thumbnail_path=tmp_path / 'out' / 'storyboard.jpg',
+        )
+
+        assert result.success is True
+        assert result.video_path == tmp_path / 'out' / 'storyboard.mp4'
+        assert result.duration_seconds == 42.25
+        assert result.metadata['render_mode'] == 'storyboard_concat'
+        assert result.metadata['clip_count'] == 2
+        assert any(command[0] == 'ffmpeg' and '-f' in command for command in commands)
 
 
 class TestVaultZettelExporter:

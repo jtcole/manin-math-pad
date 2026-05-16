@@ -8,6 +8,9 @@ import zipfile
 from django.test import Client, override_settings
 
 from manim_math_pad.engine.renderer import RenderResult
+from manim_math_pad.management.commands.process_render_queue import (
+    Command as ProcessRenderQueueCommand,
+)
 from manim_math_pad.models import Animation, AnimationStoryboard, Session
 
 
@@ -132,6 +135,106 @@ def test_storyboard_can_be_canceled_as_one_job(migrated_db):
     payload = response.json()
     assert payload['status'] == 'canceled'
     assert {clip['status'] for clip in payload['clips']} == {'canceled'}
+
+
+def test_render_queue_assembles_completed_storyboard_clips(
+    migrated_db,
+    monkeypatch,
+    tmp_path,
+):
+    media_root = tmp_path / 'media'
+    session = Session.objects.create(title='Queue')
+    storyboard = AnimationStoryboard.objects.create(
+        session=session,
+        concept='derivative',
+        summary='A lesson.',
+        status='rendering',
+        metadata={},
+    )
+    completed_path = media_root / 'manim' / 'animations' / 'completed.mp4'
+    completed_path.parent.mkdir(parents=True, exist_ok=True)
+    completed_path.write_bytes(b'first')
+    completed = Animation.objects.create(
+        session=session,
+        storyboard=storyboard,
+        concept='derivative',
+        clip_index=1,
+        clip_count=2,
+        clip_title='Hook',
+        status='completed',
+    )
+    completed.video_file.name = 'manim/animations/completed.mp4'
+    completed.save(update_fields=['video_file'])
+    pending = Animation.objects.create(
+        session=session,
+        storyboard=storyboard,
+        concept='derivative',
+        clip_index=2,
+        clip_count=2,
+        clip_title='Visual',
+        scene_code=(
+            'from manim import *\n\n'
+            'class VisualScene(Scene):\n'
+            '    def construct(self):\n'
+            '        self.wait(1)\n'
+        ),
+        status='pending',
+        metadata={'scene_name': 'VisualScene'},
+    )
+
+    def fake_render(self, scene_code, scene_name, job_uid=None, timeout=120):
+        video_path = media_root / 'manim' / 'render_queue' / f'{job_uid}.mp4'
+        video_path.parent.mkdir(parents=True, exist_ok=True)
+        video_path.write_bytes(b'second')
+        return RenderResult(success=True, video_path=video_path, duration_seconds=7.0)
+
+    def fake_concat(self, video_paths, output_path, thumbnail_path=None, timeout=120):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b'combined')
+        if thumbnail_path:
+            thumbnail_path.write_bytes(b'thumb')
+        return RenderResult(
+            success=True,
+            video_path=output_path,
+            thumbnail_path=thumbnail_path,
+            duration_seconds=14.0,
+            metadata={'render_mode': 'storyboard_concat', 'clip_count': len(video_paths)},
+        )
+
+    monkeypatch.setattr(
+        'manim_math_pad.management.commands.process_render_queue.ManimRenderer.render',
+        fake_render,
+    )
+    monkeypatch.setattr(
+        'manim_math_pad.management.commands.process_render_queue.ManimRenderer.concatenate_videos',
+        fake_concat,
+    )
+
+    with override_settings(MEDIA_ROOT=str(media_root), MEDIA_URL='/media/'):
+        ProcessRenderQueueCommand()._process_animation(
+            pending,
+            {
+                'quality': 'low_quality',
+                'fps': 15,
+                'manim_cmd': 'manim',
+                'timeout': 30,
+                'skip_storyboard_concat': False,
+                'scene_model': None,
+            },
+        )
+
+    storyboard.refresh_from_db()
+    pending.refresh_from_db()
+    assert pending.status == 'completed'
+    assert storyboard.status == 'completed'
+    assert storyboard.metadata['combined_status'] == 'completed'
+    assert storyboard.metadata['combined_duration_seconds'] == 14.0
+    assert storyboard.metadata['combined_video_path'].endswith(f'{storyboard.uid}.mp4')
+
+    with override_settings(MEDIA_ROOT=str(media_root), MEDIA_URL='/media/'):
+        payload = client_payload = Client().get(f'/api/manim/storyboard/{storyboard.uid}/').json()
+    assert client_payload['combined_video_url'].endswith(f'{storyboard.uid}.mp4')
+    assert payload['duration_seconds'] == 14.0
 
 
 def test_inline_animation_mode_marks_completed(migrated_db, monkeypatch, tmp_path):
