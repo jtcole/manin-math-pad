@@ -48,14 +48,16 @@ def migrated_db(db):
     """Create the in-memory SQLite schema for endpoint tests."""
     call_command('migrate', verbosity=0, interactive=False)
 
-    from manim_math_pad.models import Animation, Message, Session, ZettelCluster
+    from manim_math_pad.models import Animation, AnimationStoryboard, Message, Session, ZettelCluster
 
     Animation.objects.all().delete()
+    AnimationStoryboard.objects.all().delete()
     Message.objects.all().delete()
     ZettelCluster.objects.all().delete()
     Session.objects.all().delete()
     yield
     Animation.objects.all().delete()
+    AnimationStoryboard.objects.all().delete()
     Message.objects.all().delete()
     ZettelCluster.objects.all().delete()
     Session.objects.all().delete()

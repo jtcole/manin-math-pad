@@ -104,6 +104,7 @@ class Command(BaseCommand):
             animation.status = 'generating'
             animation.error_message = ''
             animation.save(update_fields=['status', 'error_message'])
+            self._sync_storyboard(animation)
             return animation
 
     def _process_animation(self, animation: Animation, options: dict) -> None:
@@ -183,6 +184,7 @@ class Command(BaseCommand):
         self._log_transition(animation, animation.status, 'rendering')
         animation.status = 'rendering'
         animation.save(update_fields=['metadata', 'status'])
+        self._sync_storyboard(animation)
 
     def _mark_completed(self, animation: Animation, result) -> None:
         metadata = animation.metadata or {}
@@ -211,6 +213,7 @@ class Command(BaseCommand):
                 )
 
         animation.save()
+        self._sync_storyboard(animation)
 
     def _mark_failed(self, animation: Animation, error_message: str, metadata: dict) -> None:
         existing_metadata = animation.metadata or {}
@@ -221,6 +224,7 @@ class Command(BaseCommand):
         animation.error_message = (error_message or 'Unknown render failure')[:2000]
         animation.completed_at = timezone.now()
         animation.save(update_fields=['metadata', 'status', 'error_message', 'completed_at'])
+        self._sync_storyboard(animation)
         self.stderr.write(self.style.ERROR(f'Failed animation {animation.uid}: {error_message}'))
 
     def _render_output_dir(self) -> Path:
@@ -231,3 +235,34 @@ class Command(BaseCommand):
         message = f'Animation {animation.uid}: {old_status} -> {new_status}'
         logger.info(message)
         self.stdout.write(message)
+
+    def _sync_storyboard(self, animation: Animation) -> None:
+        if not animation.storyboard_id:
+            return
+
+        storyboard = animation.storyboard
+        statuses = set(storyboard.clips.values_list('status', flat=True))
+        if statuses <= {'completed'}:
+            status = 'completed'
+        elif statuses <= {'canceled'}:
+            status = 'canceled'
+        elif 'failed' in statuses:
+            status = 'failed'
+        elif statuses & {'generating', 'rendering', 'completed'}:
+            status = 'rendering'
+        else:
+            status = 'pending'
+
+        terminal = status in {'completed', 'failed', 'canceled'}
+        update_fields = []
+        if storyboard.status != status:
+            storyboard.status = status
+            update_fields.append('status')
+        if terminal and storyboard.completed_at is None:
+            storyboard.completed_at = timezone.now()
+            update_fields.append('completed_at')
+        if not terminal and storyboard.completed_at is not None:
+            storyboard.completed_at = None
+            update_fields.append('completed_at')
+        if update_fields:
+            storyboard.save(update_fields=update_fields)

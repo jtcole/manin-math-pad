@@ -9,6 +9,8 @@ Routes:
   /api/manim/chat/           — GET serves browser chat page
   /api/manim/animate/        — generate Manim animation for a concept
   /api/manim/animate/<uid>/  — get animation status / download
+  /api/manim/storyboard/     — queue a multi-clip storyboard
+  /api/manim/storyboard/<uid>/ — get/cancel storyboard status
   /api/manim/zettel/         — generate Obsidian zettel cluster
   /api/manim/zettel/<uid>/   — download zettel cluster
   /api/manim/zettel/<uid>/export/ — export one cluster to vault
@@ -27,6 +29,8 @@ urlpatterns = [
     path('chat-ui/', views.ChatPageView.as_view(), name='chat_page'),
     path('animate/', views.AnimateView.as_view(), name='animate'),
     path('animate/<str:uid>/', views.AnimationStatusView.as_view(), name='animation_status'),
+    path('storyboard/', views.StoryboardView.as_view(), name='storyboard'),
+    path('storyboard/<str:uid>/', views.StoryboardStatusView.as_view(), name='storyboard_status'),
     path('zettel/', views.ZettelView.as_view(), name='zettel'),
     path('zettel/export-all/', views.ZettelExportAllView.as_view(), name='zettel_export_all'),
     path('zettel/<str:uid>/export/', views.ZettelExportView.as_view(), name='zettel_export'),

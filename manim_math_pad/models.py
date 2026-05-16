@@ -3,6 +3,7 @@ Manim Math Pad — Models.
 
 Session: a chat session between a user and the math pad.
 Message: individual messages within a session.
+AnimationStoryboard: a multi-clip animation plan.
 Animation: a Manim rendering job.
 ZettelCluster: an Obsidian zettel cluster export job.
 """
@@ -52,6 +53,36 @@ class Message(models.Model):
         return f'Message({self.role}, session={self.session.uid})'
 
 
+class AnimationStoryboard(models.Model):
+    """A multi-step animation plan composed of renderable clips."""
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('rendering', 'Rendering clips'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('canceled', 'Canceled'),
+    ]
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name='storyboards')
+    concept = models.CharField(max_length=255, help_text='Math concept being storyboarded')
+    summary = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(default=timezone.now)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Storyboard metadata: domain, clip titles, generation source, etc.',
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'AnimationStoryboard({self.concept}, {self.status})'
+
+
 class Animation(models.Model):
     """A Manim animation rendering job."""
     STATUS_CHOICES = [
@@ -64,7 +95,18 @@ class Animation(models.Model):
     ]
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name='animations')
+    storyboard = models.ForeignKey(
+        AnimationStoryboard,
+        on_delete=models.CASCADE,
+        related_name='clips',
+        null=True,
+        blank=True,
+    )
     concept = models.CharField(max_length=255, help_text='Math concept being animated')
+    clip_index = models.PositiveIntegerField(null=True, blank=True)
+    clip_count = models.PositiveIntegerField(null=True, blank=True)
+    clip_title = models.CharField(max_length=255, blank=True, default='')
+    clip_summary = models.TextField(blank=True, default='')
     scene_code = models.TextField(blank=True, default='', help_text='Generated Manim Python code')
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='pending')
     video_file = models.FileField(upload_to='manim/animations/', blank=True, null=True)

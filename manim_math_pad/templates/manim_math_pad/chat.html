@@ -199,6 +199,47 @@
     background: #101828;
   }
 
+  .storyboard-summary {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.5;
+    margin: -2px 0 10px;
+  }
+
+  .storyboard-clips {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .storyboard-clip {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px;
+  }
+
+  .clip-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .clip-title {
+    overflow-wrap: anywhere;
+    font-weight: 650;
+  }
+
+  .clip-summary {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.45;
+    margin: 0 0 8px;
+  }
+
   .artifact-status {
     display: grid;
     gap: 10px;
@@ -611,7 +652,21 @@
       return;
     }
 
+    const storyboardClipUids = new Set();
+    (state.currentSession.storyboards || []).forEach((storyboard) => {
+      renderStoryboard(storyboard);
+      (storyboard.clips || []).forEach((clip) => {
+        storyboardClipUids.add(clip.uid);
+        if (["pending", "generating", "rendering"].includes(clip.status)) {
+          pollAnimation(clip.uid);
+        }
+      });
+    });
+
     (state.currentSession.animations || []).forEach((animation) => {
+      if (storyboardClipUids.has(animation.uid)) {
+        return;
+      }
       renderAnimation(animation);
       if (["pending", "generating", "rendering"].includes(animation.status)) {
         pollAnimation(animation.uid);
@@ -621,6 +676,131 @@
     (state.currentSession.zettel_clusters || []).forEach((cluster) => {
       renderZettel(cluster);
     });
+  }
+
+  function renderStoryboard(storyboard) {
+    const existing = document.querySelector(`[data-storyboard-uid="${storyboard.uid}"]`);
+    const card = existing || document.createElement("article");
+    card.className = "artifact";
+    card.dataset.storyboardUid = storyboard.uid;
+    card.dataset.status = storyboard.status || "pending";
+    card.innerHTML = "";
+
+    const header = document.createElement("div");
+    header.className = "artifact-header";
+
+    const title = document.createElement("div");
+    title.className = "artifact-title";
+    title.textContent = `${storyboard.concept} storyboard`;
+    header.appendChild(title);
+
+    const actions = document.createElement("div");
+    actions.className = "artifact-actions";
+    const statusPill = document.createElement("span");
+    statusPill.className = "status-pill";
+    statusPill.textContent = storyboard.status || "pending";
+    actions.appendChild(statusPill);
+
+    const active = ["pending", "rendering"].includes(storyboard.status || "pending");
+    if (active) {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "cancel-button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => cancelStoryboard(storyboard.uid));
+      actions.appendChild(cancel);
+    }
+
+    header.appendChild(actions);
+    card.appendChild(header);
+
+    if (storyboard.summary) {
+      const summary = document.createElement("p");
+      summary.className = "storyboard-summary";
+      summary.textContent = storyboard.summary;
+      card.appendChild(summary);
+    }
+
+    const clips = document.createElement("ol");
+    clips.className = "storyboard-clips";
+    card.appendChild(clips);
+
+    (storyboard.clips || []).forEach((clip) => {
+      clips.appendChild(renderStoryboardClip(clip));
+    });
+
+    if (!existing) {
+      messageStream.appendChild(card);
+    }
+    scrollToBottom();
+  }
+
+  function renderStoryboardClip(clip) {
+    const item = document.createElement("li");
+    item.className = "storyboard-clip";
+    item.dataset.status = clip.status || "pending";
+
+    const header = document.createElement("div");
+    header.className = "clip-header";
+
+    const title = document.createElement("div");
+    title.className = "clip-title";
+    title.textContent = `${clip.clip_index || ""}. ${clip.clip_title || clip.concept}`.trim();
+    header.appendChild(title);
+
+    const status = document.createElement("span");
+    status.className = "status-pill";
+    status.textContent = clip.status || "pending";
+    header.appendChild(status);
+    item.appendChild(header);
+
+    if (clip.clip_summary) {
+      const summary = document.createElement("p");
+      summary.className = "clip-summary";
+      summary.textContent = clip.clip_summary;
+      item.appendChild(summary);
+    }
+
+    if (clip.status === "completed" && clip.video_url) {
+      const video = document.createElement("video");
+      video.controls = true;
+      video.src = clip.video_url;
+      if (clip.thumbnail_url) {
+        video.poster = clip.thumbnail_url;
+      }
+      item.appendChild(video);
+    } else if (clip.status === "failed" || clip.status === "canceled") {
+      const error = document.createElement("div");
+      error.className = "artifact-error";
+      error.textContent = clip.error || "Canceled.";
+      item.appendChild(error);
+    } else {
+      const statusBody = document.createElement("div");
+      statusBody.className = "artifact-status";
+      const progress = document.createElement("div");
+      progress.className = "progress-line";
+      progress.setAttribute("aria-label", `Clip ${clip.status || "pending"}`);
+      const message = document.createElement("span");
+      message.textContent =
+        clip.status === "pending" ? "Queued for rendering." : "Rendering in progress.";
+      statusBody.appendChild(progress);
+      statusBody.appendChild(message);
+      item.appendChild(statusBody);
+    }
+
+    if (clip.scene_code) {
+      const codeDetails = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "Scene code";
+      const code = document.createElement("pre");
+      code.className = "scene-code";
+      code.textContent = clip.scene_code;
+      codeDetails.appendChild(summary);
+      codeDetails.appendChild(code);
+      item.appendChild(codeDetails);
+    }
+
+    return item;
   }
 
   function renderAnimation(animation) {
@@ -788,7 +968,11 @@
       try {
         const animation = await api(`animate/${uid}/`);
         mergeAnimation(animation);
-        renderAnimation(animation);
+        if (animation.storyboard_uid) {
+          await fetchStoryboard(animation.storyboard_uid);
+        } else {
+          renderAnimation(animation);
+        }
         queueStatus.textContent = animation.status;
         if (["completed", "failed", "canceled"].includes(animation.status)) {
           window.clearInterval(interval);
@@ -818,6 +1002,38 @@
       animations.push(animation);
     }
     state.currentSession.animations = animations;
+
+    if (animation.storyboard_uid) {
+      const storyboards = state.currentSession.storyboards || [];
+      const storyboard = storyboards.find((item) => item.uid === animation.storyboard_uid);
+      if (storyboard) {
+        const clips = storyboard.clips || [];
+        const clipIndex = clips.findIndex((item) => item.uid === animation.uid);
+        if (clipIndex >= 0) {
+          clips[clipIndex] = animation;
+        } else {
+          clips.push(animation);
+        }
+        storyboard.clips = clips;
+      }
+      state.currentSession.storyboards = storyboards;
+    }
+  }
+
+  function mergeStoryboard(storyboard) {
+    if (!state.currentSession) {
+      return;
+    }
+    const storyboards = state.currentSession.storyboards || [];
+    const index = storyboards.findIndex((item) => item.uid === storyboard.uid);
+    if (index >= 0) {
+      storyboards[index] = storyboard;
+    } else {
+      storyboards.push(storyboard);
+    }
+    state.currentSession.storyboards = storyboards;
+
+    (storyboard.clips || []).forEach((clip) => mergeAnimation(clip));
   }
 
   function mergeZettel(cluster) {
@@ -834,10 +1050,41 @@
     state.currentSession.zettel_clusters = clusters;
   }
 
+  async function fetchStoryboard(uid) {
+    const storyboard = await api(`storyboard/${uid}/`);
+    mergeStoryboard(storyboard);
+    renderStoryboard(storyboard);
+    (storyboard.clips || []).forEach((clip) => {
+      if (["pending", "generating", "rendering"].includes(clip.status)) {
+        pollAnimation(clip.uid);
+      }
+    });
+  }
+
   async function fetchZettel(uid) {
     const cluster = await api(`zettel/${uid}/`);
     mergeZettel(cluster);
     renderZettel(cluster);
+  }
+
+  async function cancelStoryboard(uid) {
+    try {
+      const storyboard = await api(`storyboard/${uid}/`, {
+        method: "PATCH",
+        body: JSON.stringify({status: "canceled"}),
+      });
+      mergeStoryboard(storyboard);
+      renderStoryboard(storyboard);
+      queueStatus.textContent = "Canceled";
+      (storyboard.clips || []).forEach((clip) => {
+        if (state.polls.has(clip.uid)) {
+          window.clearInterval(state.polls.get(clip.uid));
+          state.polls.delete(clip.uid);
+        }
+      });
+    } catch (error) {
+      setError(error.message);
+    }
   }
 
   async function cancelAnimation(uid) {
@@ -980,13 +1227,18 @@
           message,
           animate: state.animate,
           zettel: state.zettel,
+          storyboard: state.animate,
           model: state.model,
         }),
       });
 
       pending.textContent = data.message || "";
       pending.classList.remove("processing");
-      if (data.animation) {
+      if (data.storyboard) {
+        mergeStoryboard(data.storyboard);
+        renderStoryboard(data.storyboard);
+        (data.storyboard.clips || []).forEach((clip) => pollAnimation(clip.uid));
+      } else if (data.animation) {
         mergeAnimation(data.animation);
         renderAnimation(data.animation);
         pollAnimation(data.animation.uid);

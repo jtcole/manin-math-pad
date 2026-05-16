@@ -84,14 +84,15 @@ class EulersIdentity(Scene):
         # Title
         title = MathTex(r"e^{i\\pi} = -1", font_size=72)
         title.to_edge(UP)
-        self.play(Write(title))
-        self.wait(0.5)
+        step = Text("Step 1: complex exponentials rotate", font_size=28).to_edge(DOWN)
+        self.play(Write(title), FadeIn(step))
+        self.wait(1)
 
         # Unit circle
         circle = Circle(radius=2, color=BLUE)
         axes = Axes(x_range=[-3, 3], y_range=[-3, 3], x_length=6, y_length=6)
         self.play(Create(axes), Create(circle))
-        self.wait(0.5)
+        self.wait(1)
 
         # Point on circle: angle pi
         angle_tracker = ValueTracker(0)
@@ -111,11 +112,24 @@ class EulersIdentity(Scene):
                 font_size=28
             ).next_to(dot, UR, buff=0.2)
         )
+        angle_label = always_redraw(
+            lambda: MathTex(
+                rf"t = {angle_tracker.get_value():.2f}",
+                font_size=34
+            ).to_corner(UL)
+        )
 
-        self.play(FadeIn(dot), FadeIn(label))
-        self.play(angle_tracker.animate.set_value(PI), run_time=3)
+        self.play(FadeIn(dot), FadeIn(label), Write(angle_label))
+        self.play(
+            Transform(step, Text("Step 2: move halfway around the unit circle", font_size=28).to_edge(DOWN))
+        )
+        self.play(angle_tracker.animate.set_value(PI), run_time=5)
+        self.wait(1)
 
         # Show e^(i*pi) = -1
+        self.play(
+            Transform(step, Text("Step 3: read the final coordinates", font_size=28).to_edge(DOWN))
+        )
         result = MathTex(
             r"e^{i\\pi}",
             "=",
@@ -125,8 +139,11 @@ class EulersIdentity(Scene):
             font_size=42,
         )
         result.to_edge(DOWN)
-        self.play(Write(result))
-        self.wait(2)
+        coord = MathTex(r"(\\cos \\pi, \\sin \\pi)=(-1, 0)", font_size=40).next_to(title, DOWN)
+        self.play(Write(coord))
+        self.wait(1)
+        self.play(ReplacementTransform(coord, result), FadeOut(step))
+        self.wait(3)
 ''',
     },
     'derivative-definition': {
@@ -138,6 +155,11 @@ from manim import *
 
 class DerivativeDefinition(Scene):
     def construct(self):
+        title = MathTex(r"f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h}", font_size=44)
+        title.to_edge(UP)
+        step = Text("Step 1: start with an average rate of change", font_size=28).to_edge(DOWN)
+        self.play(Write(title), FadeIn(step))
+
         # Axes
         axes = Axes(
             x_range=[-1, 8], y_range=[-1, 8],
@@ -173,16 +195,32 @@ class DerivativeDefinition(Scene):
                 color=RED
             )
         )
-        self.play(FadeIn(dot), FadeIn(moving_dot), Create(secant))
-        self.wait(0.5)
+        h_label = always_redraw(
+            lambda: MathTex(rf"h={h_tracker.get_value():.2f}", font_size=34).to_corner(UR)
+        )
+        quotient = always_redraw(
+            lambda: MathTex(
+                rf"\\frac{{f(x+h)-f(x)}}{{h}} \\approx {2 + 0.5 * h_tracker.get_value():.2f}",
+                font_size=34
+            ).next_to(step, UP)
+        )
+        self.play(FadeIn(dot), FadeIn(moving_dot), Create(secant), Write(h_label), Write(quotient))
+        self.wait(1)
 
         # Animate h → 0
-        title = MathTex(r"f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h}", font_size=48)
-        title.to_edge(UP)
-        self.play(Write(title))
-
-        self.play(h_tracker.animate.set_value(0.01), run_time=4)
-        self.wait(2)
+        self.play(
+            Transform(step, Text("Step 2: shrink h and watch the secant settle", font_size=28).to_edge(DOWN))
+        )
+        self.play(h_tracker.animate.set_value(0.01), run_time=6)
+        tangent = Line(
+            axes.c2p(x_val - 1.5, func(x_val) - 2 * 1.5),
+            axes.c2p(x_val + 1.5, func(x_val) + 2 * 1.5),
+            color=YELLOW,
+        )
+        conclusion = Text("Step 3: the limiting slope is the derivative", font_size=28).to_edge(DOWN)
+        slope_label = MathTex(r"f'(3)=2", font_size=42).next_to(dot, UL)
+        self.play(Transform(step, conclusion), ReplacementTransform(secant, tangent), Write(slope_label))
+        self.wait(3)
 ''',
     },
     'matrix-multiplication': {
@@ -194,6 +232,10 @@ from manim import *
 
 class MatrixMultiplication(Scene):
     def construct(self):
+        title = Text("Matrix multiplication: rows meet columns", font_size=36).to_edge(UP)
+        step = Text("Step 1: set up A, B, and the result", font_size=28).to_edge(DOWN)
+        self.play(Write(title), FadeIn(step))
+
         # Define matrices
         A = Matrix([["1", "2"], ["3", "4"]]).set_color(BLUE)
         A_label = MathTex("A", font_size=48).next_to(A, UP)
@@ -214,18 +256,35 @@ class MatrixMultiplication(Scene):
         group = VGroup(A, A_label, times, B, B_label, equals, C, C_label)
         group.move_to(ORIGIN)
 
-        self.play(Write(A), Write(A_label))
-        self.play(Write(times))
-        self.play(Write(B), Write(B_label))
+        self.play(Write(A), Write(A_label), run_time=1.5)
+        self.play(Write(times), run_time=0.8)
+        self.play(Write(B), Write(B_label), run_time=1.5)
         self.wait(1)
-        self.play(Write(equals), Write(C), Write(C_label))
-        self.wait(2)
+        self.play(
+            Transform(step, Text("Step 2: each result entry is one row dot one column", font_size=28).to_edge(DOWN))
+        )
+        self.play(Write(equals), Write(C), Write(C_label), run_time=1.5)
+        self.wait(1)
 
         # Show computation step
-        step = MathTex(r"c_{11} = 1 \\times 5 + 2 \\times 7 = 19", font_size=36)
-        step.to_edge(DOWN)
-        self.play(Write(step))
-        self.wait(2)
+        computations = [
+            MathTex(r"c_{11} = 1 \\times 5 + 2 \\times 7 = 19", font_size=34),
+            MathTex(r"c_{12} = 1 \\times 6 + 2 \\times 8 = 22", font_size=34),
+            MathTex(r"c_{21} = 3 \\times 5 + 4 \\times 7 = 43", font_size=34),
+            MathTex(r"c_{22} = 3 \\times 6 + 4 \\times 8 = 50", font_size=34),
+        ]
+        current = computations[0].next_to(group, DOWN, buff=0.6)
+        self.play(Write(current), run_time=1.5)
+        self.wait(1)
+        for expression in computations[1:]:
+            expression.next_to(group, DOWN, buff=0.6)
+            self.play(ReplacementTransform(current, expression), run_time=1.5)
+            current = expression
+            self.wait(1)
+        self.play(
+            Transform(step, Text("Step 3: repeat the row-column rule for every entry", font_size=28).to_edge(DOWN))
+        )
+        self.wait(3)
 ''',
     },
     'fourier-series': {
@@ -239,7 +298,8 @@ class FourierSeriesSquare(Scene):
     def construct(self):
         title = Text("Fourier Series: Square Wave Approximation", font_size=38)
         title.to_edge(UP)
-        self.play(Write(title))
+        step = Text("Step 1: target a repeating square wave", font_size=28).to_edge(DOWN)
+        self.play(Write(title), FadeIn(step))
 
         axes = Axes(
             x_range=[-2 * PI, 2 * PI, PI],
@@ -256,6 +316,7 @@ class FourierSeriesSquare(Scene):
             color=GREY_B, stroke_width=1
         )
         self.play(Create(square_wave))
+        self.wait(1)
 
         # Fourier approximation with increasing terms
         n_terms_tracker = ValueTracker(1)
@@ -278,8 +339,27 @@ class FourierSeriesSquare(Scene):
         )
 
         self.play(Create(fourier_curve), Write(terms_label))
-        self.play(n_terms_tracker.animate.set_value(20), run_time=8, rate_func=linear)
-        self.wait(2)
+        self.play(
+            Transform(step, Text("Step 2: add low frequencies first", font_size=28).to_edge(DOWN)),
+            n_terms_tracker.animate.set_value(3),
+            run_time=3,
+            rate_func=linear,
+        )
+        self.wait(1)
+        self.play(
+            Transform(step, Text("Step 3: odd harmonics sharpen the jumps", font_size=28).to_edge(DOWN)),
+            n_terms_tracker.animate.set_value(8),
+            run_time=4,
+            rate_func=linear,
+        )
+        self.wait(1)
+        self.play(
+            Transform(step, Text("Step 4: more terms improve the approximation", font_size=28).to_edge(DOWN)),
+            n_terms_tracker.animate.set_value(20),
+            run_time=6,
+            rate_func=linear,
+        )
+        self.wait(3)
 ''',
     },
 }
@@ -408,9 +488,25 @@ class {scene_name}(Scene):
         self.play(Write(title))
         self.wait(1)
 
-        placeholder = Text(f"Animation placeholder: {{domain}}", font_size=32, color=GREY)
-        placeholder.move_to(ORIGIN)
-        self.play(FadeIn(placeholder))
+        steps = [
+            "1. Name the object",
+            "2. Show the operation",
+            "3. Track what changes",
+            "4. Mark what stays meaningful",
+            "5. State the takeaway",
+        ]
+        step_group = VGroup(
+            *[Text(step, font_size=30) for step in steps]
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.25)
+        step_group.move_to(ORIGIN)
+
+        domain_label = Text(f"Domain: {domain}", font_size=28, color=GREY).to_edge(DOWN)
+        self.play(FadeIn(domain_label))
+        for step_text in step_group:
+            self.play(Write(step_text), run_time=0.8)
+            self.wait(0.6)
+        box = SurroundingRectangle(step_group, color=YELLOW, buff=0.25)
+        self.play(Create(box))
         self.wait(2)
 '''.strip()
 
@@ -449,7 +545,7 @@ Available Manim classes and helpers:
 - Scene, ThreeDScene
 - Circle, Square, Rectangle, Axes, NumberPlane
 - Text, Tex, MathTex, Matrix, VGroup, VDict
-- Dot, Arrow, Line, CurvedArrow, Arc, Annulus, Brace
+- Dot, Arrow, Line, CurvedArrow, Arc, Annulus, Brace, SurroundingRectangle
 - ValueTracker, always_redraw
 
 Available animations:
@@ -678,7 +774,10 @@ Rules:
 - The code must start with `from manim import *`.
 - Define exactly one primary scene class named {scene_name}.
 - The scene must include `def construct(self):`.
-- Keep the animation short and renderable without external assets.
+- Build a 25-45 second explanatory scene with 4-6 visible steps.
+- Use step labels or short captions so the viewer can follow the concept.
+- Prefer a concrete example over an abstract-only animation.
+- Keep rendering practical without external assets.
 - Use valid Python and valid Manim Community Edition APIs.
 - Prefer Text() for plain labels when Tex()/MathTex() is unnecessary.
 """.strip()

@@ -8,7 +8,7 @@ import zipfile
 from django.test import Client, override_settings
 
 from manim_math_pad.engine.renderer import RenderResult
-from manim_math_pad.models import Animation, Session
+from manim_math_pad.models import Animation, AnimationStoryboard, Session
 
 
 def post_json(client: Client, path: str, payload: dict):
@@ -67,10 +67,65 @@ def test_chat_can_queue_animation_and_create_zettel(migrated_db):
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload['storyboard']['status'] == 'pending'
+    assert payload['storyboard']['clip_count'] >= 4
+    assert payload['storyboard']['clips'][0]['clip_index'] == 1
     assert payload['animation']['status'] == 'pending'
+    assert payload['animation']['storyboard_uid'] == payload['storyboard']['uid']
     assert payload['animation']['scene_code'].startswith('from manim import *')
     assert payload['zettel']['status'] == 'completed'
     assert payload['zettel']['note_count'] >= 4
+
+    storyboard = AnimationStoryboard.objects.get(uid=payload['storyboard']['uid'])
+    assert storyboard.clips.count() == payload['storyboard']['clip_count']
+
+
+def test_storyboard_endpoint_queues_connected_clip_jobs(migrated_db):
+    client = Client()
+    session_uid = post_json(client, '/api/manim/session/', {}).json()['uid']
+
+    response = post_json(
+        client,
+        '/api/manim/storyboard/',
+        {
+            'session_uid': session_uid,
+            'concept': 'derivative',
+            'clip_count': 4,
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload['concept'] == 'derivative'
+    assert payload['status'] == 'pending'
+    assert payload['clip_count'] == 4
+    assert [clip['clip_index'] for clip in payload['clips']] == [1, 2, 3, 4]
+    assert all(clip['storyboard_uid'] == payload['uid'] for clip in payload['clips'])
+
+    detail = client.get(f'/api/manim/session/{session_uid}/')
+    assert detail.status_code == 200
+    assert detail.json()['storyboards'][0]['uid'] == payload['uid']
+
+
+def test_storyboard_can_be_canceled_as_one_job(migrated_db):
+    client = Client()
+    session_uid = post_json(client, '/api/manim/session/', {}).json()['uid']
+    storyboard = post_json(
+        client,
+        '/api/manim/storyboard/',
+        {'session_uid': session_uid, 'concept': 'matrix multiplication'},
+    ).json()
+
+    response = client.patch(
+        f'/api/manim/storyboard/{storyboard["uid"]}/',
+        data=json.dumps({'status': 'canceled'}),
+        content_type='application/json',
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['status'] == 'canceled'
+    assert {clip['status'] for clip in payload['clips']} == {'canceled'}
 
 
 def test_inline_animation_mode_marks_completed(migrated_db, monkeypatch, tmp_path):

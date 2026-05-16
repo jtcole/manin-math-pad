@@ -18,10 +18,11 @@ from django.views import View
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import Animation, Message, Session, ZettelCluster
+from .models import Animation, AnimationStoryboard, Message, Session, ZettelCluster
 from .engine.chat_service import MathChatService
 from .engine.renderer import ManimRenderer
 from .engine.scene_generator import LLMSceneGenerator, SceneGenerator
+from .engine.storyboard_generator import StoryboardGenerator
 from .engine.vault_exporter import VaultZettelExporter
 from .engine.zettel_generator import ZettelGenerator
 
@@ -91,6 +92,16 @@ def _scene_llm_enabled(body: dict) -> bool:
 
 def _render_mode(body: dict) -> str:
     return str(body.get('render_mode') or _env_or_setting('MANIM_RENDER_MODE', 'queue')).lower()
+
+
+def _storyboard_requested(body: dict, default: bool = False) -> bool:
+    for key in ['storyboard', 'multi_step', 'multi_clip']:
+        if key in body:
+            return _truthy(body.get(key))
+    configured = _env_or_setting('MANIM_STORYBOARD_DEFAULT')
+    if configured is not None:
+        return _truthy(configured)
+    return default
 
 
 def _int_option(body: dict, key: str, default: int) -> int:
@@ -173,6 +184,10 @@ class SessionDetailView(View):
                 'animations': [
                     _animation_payload(animation, include_urls=True)
                     for animation in session.animations.order_by('created_at')
+                ],
+                'storyboards': [
+                    _storyboard_payload(storyboard, include_urls=True)
+                    for storyboard in session.storyboards.order_by('created_at')
                 ],
                 'zettel_clusters': [
                     {
@@ -297,19 +312,36 @@ class ChatView(View):
 
         # Generate animation if requested
         animation = None
+        storyboard = None
         if wants_animation:
-            generated = scene_gen.generate(chat_turn.concept, context=chat_turn.artifact_context)
-            animation = Animation.objects.create(
-                session=session,
-                concept=generated.concept,
-                scene_code=generated.scene_code,
-                status='pending',
-                metadata={'source': generated.source, 'scene_name': generated.scene_name},
-            )
-            animation = _maybe_render_inline(animation, body)
-            response_parts.append(
-                _artifact_status_sentence('Animation', animation.status, generated.concept)
-            )
+            if _storyboard_requested(body, default=True):
+                storyboard = _create_storyboard(
+                    session=session,
+                    concept=chat_turn.concept,
+                    artifact_context=chat_turn.artifact_context,
+                    body=body,
+                )
+                animation = storyboard.clips.order_by('clip_index', 'created_at').first()
+                response_parts.append(
+                    _artifact_status_sentence(
+                        'Storyboard',
+                        storyboard.status,
+                        storyboard.concept,
+                    )
+                )
+            else:
+                generated = scene_gen.generate(chat_turn.concept, context=chat_turn.artifact_context)
+                animation = Animation.objects.create(
+                    session=session,
+                    concept=generated.concept,
+                    scene_code=generated.scene_code,
+                    status='pending',
+                    metadata={'source': generated.source, 'scene_name': generated.scene_name},
+                )
+                animation = _maybe_render_inline(animation, body)
+                response_parts.append(
+                    _artifact_status_sentence('Animation', animation.status, generated.concept)
+                )
 
         # Generate zettel cluster if requested
         zettel = None
@@ -365,6 +397,9 @@ class ChatView(View):
         if animation:
             response_data['animation'] = _animation_payload(animation, include_urls=True)
 
+        if storyboard:
+            response_data['storyboard'] = _storyboard_payload(storyboard, include_urls=True)
+
         if zettel:
             response_data['zettel'] = {
                 'uid': str(zettel.uid),
@@ -395,6 +430,15 @@ class AnimateView(View):
             return JsonResponse({'error': 'Session not found'}, status=404)
 
         artifact_context = MathChatService().artifact_context(session.context, concept)
+        if _storyboard_requested(body, default=False):
+            storyboard = _create_storyboard(
+                session=session,
+                concept=concept,
+                artifact_context=artifact_context,
+                body=body,
+            )
+            return JsonResponse(_storyboard_payload(storyboard, include_urls=True), status=201)
+
         scene_gen = SceneGenerator(
             enable_llm=_scene_llm_enabled(body),
             scene_model=body.get('model') or body.get('scene_model'),
@@ -463,8 +507,64 @@ class AnimationStatusView(View):
                 animation.error_message = 'Canceled by user'
                 animation.completed_at = timezone.now()
             animation.save()
+            if animation.storyboard_id:
+                _sync_storyboard_status(animation.storyboard)
 
         return JsonResponse(_animation_payload(animation, include_urls=True))
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class StoryboardView(View):
+    """Queue a multi-clip storyboard for a concept."""
+
+    def post(self, request):
+        body = _json_body(request)
+        session_uid = body.get('session_uid')
+        concept = body.get('concept', '').strip()
+
+        if not session_uid or not concept:
+            return JsonResponse({'error': 'session_uid and concept are required'}, status=400)
+
+        try:
+            session = Session.objects.get(uid=session_uid)
+        except Session.DoesNotExist:
+            return JsonResponse({'error': 'Session not found'}, status=404)
+
+        artifact_context = MathChatService().artifact_context(session.context, concept)
+        storyboard = _create_storyboard(
+            session=session,
+            concept=concept,
+            artifact_context=artifact_context,
+            body=body,
+        )
+        return JsonResponse(_storyboard_payload(storyboard, include_urls=True), status=201)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class StoryboardStatusView(View):
+    """Get or cancel a multi-clip storyboard."""
+
+    def get(self, request, uid):
+        try:
+            storyboard = AnimationStoryboard.objects.get(uid=uid)
+        except AnimationStoryboard.DoesNotExist:
+            return JsonResponse({'error': 'Storyboard not found'}, status=404)
+
+        return JsonResponse(_storyboard_payload(storyboard, include_urls=True))
+
+    def patch(self, request, uid):
+        body = _json_body(request)
+        try:
+            storyboard = AnimationStoryboard.objects.get(uid=uid)
+        except AnimationStoryboard.DoesNotExist:
+            return JsonResponse({'error': 'Storyboard not found'}, status=404)
+
+        new_status = body.get('status')
+        if new_status != 'canceled':
+            return JsonResponse({'error': f'Cannot set status to "{new_status}"'}, status=400)
+
+        _cancel_storyboard(storyboard)
+        return JsonResponse(_storyboard_payload(storyboard, include_urls=True))
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -629,6 +729,119 @@ def _artifact_status_sentence(kind: str, status: str, concept: str) -> str:
     return f'{kind} queued for: {concept}'
 
 
+def _create_storyboard(
+    session: Session,
+    concept: str,
+    artifact_context: dict,
+    body: dict,
+) -> AnimationStoryboard:
+    max_clips = _int_option(body, 'clip_count', _int_config('MANIM_STORYBOARD_MAX_CLIPS', 5))
+    generated = StoryboardGenerator(max_clips=max_clips).generate(concept, context=artifact_context)
+    storyboard = AnimationStoryboard.objects.create(
+        session=session,
+        concept=generated.concept,
+        summary=generated.summary,
+        status='pending',
+        metadata={
+            **generated.metadata,
+            'domain': generated.domain,
+            'model': body.get('model') or body.get('scene_model'),
+        },
+    )
+
+    clip_count = len(generated.clips)
+    for clip in generated.clips:
+        animation = Animation.objects.create(
+            session=session,
+            storyboard=storyboard,
+            concept=generated.concept,
+            clip_index=clip.index,
+            clip_count=clip_count,
+            clip_title=clip.title,
+            clip_summary=clip.narration,
+            scene_code=clip.scene_code,
+            status='pending',
+            metadata={
+                'source': 'storyboard',
+                'scene_name': clip.scene_name,
+                'storyboard_uid': str(storyboard.uid),
+                'clip_index': clip.index,
+                'clip_count': clip_count,
+                'clip_title': clip.title,
+                'clip_objective': clip.objective,
+                'generation': clip.metadata,
+            },
+        )
+        _maybe_render_inline(animation, body)
+
+    return _sync_storyboard_status(storyboard)
+
+
+def _sync_storyboard_status(storyboard: AnimationStoryboard) -> AnimationStoryboard:
+    clips = list(storyboard.clips.all())
+    statuses = {clip.status for clip in clips}
+
+    if not clips:
+        status = 'pending'
+    elif statuses <= {'completed'}:
+        status = 'completed'
+    elif statuses <= {'canceled'}:
+        status = 'canceled'
+    elif 'failed' in statuses:
+        status = 'failed'
+    elif statuses & {'generating', 'rendering', 'completed'}:
+        status = 'rendering'
+    else:
+        status = 'pending'
+
+    terminal = status in {'completed', 'failed', 'canceled'}
+    update_fields = []
+    if storyboard.status != status:
+        storyboard.status = status
+        update_fields.append('status')
+    if terminal and storyboard.completed_at is None:
+        storyboard.completed_at = timezone.now()
+        update_fields.append('completed_at')
+    if not terminal and storyboard.completed_at is not None:
+        storyboard.completed_at = None
+        update_fields.append('completed_at')
+    if update_fields:
+        storyboard.save(update_fields=update_fields)
+    return storyboard
+
+
+def _cancel_storyboard(storyboard: AnimationStoryboard) -> AnimationStoryboard:
+    now = timezone.now()
+    storyboard.clips.filter(status__in=['pending', 'generating', 'rendering']).update(
+        status='canceled',
+        error_message='Canceled by user',
+        completed_at=now,
+    )
+    storyboard.status = 'canceled'
+    storyboard.completed_at = now
+    storyboard.save(update_fields=['status', 'completed_at'])
+    return storyboard
+
+
+def _storyboard_payload(storyboard: AnimationStoryboard, include_urls: bool = False) -> dict:
+    storyboard = _sync_storyboard_status(storyboard)
+    clips = list(storyboard.clips.order_by('clip_index', 'created_at'))
+    return {
+        'uid': str(storyboard.uid),
+        'concept': storyboard.concept,
+        'status': storyboard.status,
+        'summary': storyboard.summary,
+        'clip_count': len(clips),
+        'created_at': storyboard.created_at.isoformat(),
+        'completed_at': storyboard.completed_at.isoformat() if storyboard.completed_at else None,
+        'metadata': storyboard.metadata or {},
+        'clips': [
+            _animation_payload(clip, include_urls=include_urls)
+            for clip in clips
+        ],
+    }
+
+
 def _maybe_render_inline(animation: Animation, body: dict) -> Animation:
     """Render immediately when local/demo inline mode is enabled."""
     if _render_mode(body) not in {'inline', 'sync', 'immediate'}:
@@ -721,6 +934,16 @@ def _animation_payload(
         'scene_name': (animation.metadata or {}).get('scene_name'),
         'source': (animation.metadata or {}).get('source'),
     }
+    if animation.storyboard_id:
+        data.update(
+            {
+                'storyboard_uid': str(animation.storyboard.uid),
+                'clip_index': animation.clip_index,
+                'clip_count': animation.clip_count,
+                'clip_title': animation.clip_title,
+                'clip_summary': animation.clip_summary,
+            }
+        )
 
     if animation.scene_code:
         data['scene_code'] = animation.scene_code
@@ -767,7 +990,23 @@ def _session_transcript(session: Session) -> str:
             ]
         )
 
-    animations = list(session.animations.order_by('created_at'))
+    storyboards = list(session.storyboards.order_by('created_at').prefetch_related('clips'))
+    if storyboards:
+        lines.extend(['## Storyboards', ''])
+        for storyboard in storyboards:
+            lines.extend(
+                [
+                    f'- {storyboard.concept} ({storyboard.status})',
+                    f'  - UID: {storyboard.uid}',
+                    f'  - Clips: {storyboard.clips.count()}',
+                ]
+            )
+            for clip in storyboard.clips.order_by('clip_index', 'created_at'):
+                title = clip.clip_title or clip.concept
+                lines.append(f'  - Clip {clip.clip_index}: {title} ({clip.status})')
+        lines.append('')
+
+    animations = list(session.animations.filter(storyboard__isnull=True).order_by('created_at'))
     if animations:
         lines.extend(['## Manim Scenes', ''])
         for animation in animations:

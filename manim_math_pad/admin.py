@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Session, Message, Animation, ZettelCluster
+from .models import Animation, AnimationStoryboard, Message, Session, ZettelCluster
 
 
 @admin.register(Session)
@@ -18,6 +18,21 @@ class MessageAdmin(admin.ModelAdmin):
 
 @admin.register(Animation)
 class AnimationAdmin(admin.ModelAdmin):
+    list_display = (
+        'uid',
+        'concept',
+        'storyboard',
+        'clip_index',
+        'status',
+        'created_at',
+        'completed_at',
+    )
+    list_filter = ('status',)
+    readonly_fields = ('uid', 'created_at')
+
+
+@admin.register(AnimationStoryboard)
+class AnimationStoryboardAdmin(admin.ModelAdmin):
     list_display = ('uid', 'concept', 'status', 'created_at', 'completed_at')
     list_filter = ('status',)
     readonly_fields = ('uid', 'created_at')

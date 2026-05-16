@@ -253,64 +253,260 @@ class ZettelGenerator:
         concept_title = concept.title()
         domain_label = domain.replace('_', ' ')
         field_key = field_name.lower()
+        example = self._example_for(concept, domain)
+        checkpoints = self._checkpoints_for(concept, domain)
 
         if 'definition' in field_key or 'statement' in field_key:
-            return (
+            core = (
                 f'{concept_title} names a {domain_label} idea by fixing the objects, '
                 f'the allowed operations, and the relation being studied. A useful '
                 f'working definition should make clear what counts as an example, '
                 f'what data is required, and which quantities are preserved.'
             )
-
-        if 'intuition' in field_key or 'geometric' in field_key or 'visualization' in field_key:
-            return (
+        elif 'intuition' in field_key or 'geometric' in field_key or 'visualization' in field_key:
+            core = (
                 f'The intuition for {concept} is to track what changes and what remains '
                 f'invariant as the representation moves. A good animation should make '
                 f'the invariant visible first, then show the transformation or limiting '
                 f'process that reveals the structure.'
             )
-
-        if 'formula' in field_key or 'matrix' in field_key or 'axiom' in field_key:
-            return (
+        elif 'formula' in field_key or 'matrix' in field_key or 'axiom' in field_key:
+            core = (
                 f'The symbolic form for {concept} should be read as a compact record of '
                 f'assumptions and operations. Identify the inputs, the rule that combines '
                 f'them, and the output being compared; this prevents the notation from '
                 f'becoming detached from the mathematical action.'
             )
-
-        if 'mistake' in field_key or 'condition' in field_key:
-            return (
+        elif 'mistake' in field_key or 'condition' in field_key:
+            core = (
                 f'A common failure mode is applying {concept} after one of its hypotheses '
                 f'has been dropped. Check the domain, boundary cases, and whether the '
                 f'objects involved satisfy the assumptions before transferring a result.'
             )
-
-        if 'application' in field_key or 'example' in field_key:
-            return (
+        elif 'application' in field_key or 'example' in field_key:
+            core = (
                 f'Use examples of {concept} that expose the mechanism, not just the final '
                 f'answer. Start with a small concrete case, compute it directly, then '
                 f'explain which part of the computation scales to the general situation.'
             )
-
-        if 'theorem' in field_key or 'result' in field_key or 'property' in field_key:
-            return (
+        elif 'theorem' in field_key or 'result' in field_key or 'property' in field_key:
+            core = (
                 f'The important results around {concept} usually describe invariance, '
                 f'existence, uniqueness, or approximation. State each result with its '
                 f'conditions attached, then separate the proof idea from the formal proof.'
             )
-
-        if 'connection' in field_key or 'related' in field_key or 'classification' in field_key:
-            return (
+        elif 'connection' in field_key or 'related' in field_key or 'classification' in field_key:
+            core = (
                 f'Place {concept} in a local map: what it generalizes, what it depends on, '
                 f'and which neighboring ideas solve the same problem with different '
                 f'constraints. These links are where the note becomes reusable.'
             )
+        else:
+            core = (
+                f'This aspect of {concept} captures how the idea behaves inside {domain_label}. '
+                f'Keep the note atomic: one claim, one example, and one link back to the '
+                f'central concept.'
+            )
 
         return (
-            f'This aspect of {concept} captures how the idea behaves inside {domain_label}. '
-            f'Keep the note atomic: one claim, one example, and one link back to the '
-            f'central concept.'
+            f'{core}\n\n'
+            f'Working example: {example}\n\n'
+            f'Checks: {checkpoints}'
         )
+
+    def _example_for(self, concept: str, domain: str) -> str:
+        lowered = concept.lower()
+        if 'derivative' in lowered:
+            return 'For f(x)=x^2 at x=3, the secant slope is 6+h and the limiting slope is 6.'
+        if 'limit' in lowered:
+            return 'For (x^2-1)/(x-1), nearby values behave like x+1, so the limit at x=1 is 2.'
+        if 'integral' in lowered:
+            return 'For v(t)=2t on [0,3], the accumulated distance is the area under the curve, 9.'
+        if 'euler' in lowered:
+            return 'At angle pi on the unit circle, cos(pi)=-1 and sin(pi)=0, so e^(i*pi)=-1.'
+        if 'matrix' in lowered:
+            return 'The top-left entry of [[1,2],[3,4]][[5,6],[7,8]] is 1*5 + 2*7 = 19.'
+        if 'fourier' in lowered:
+            return 'A square wave becomes recognizable by adding the first odd sine terms, then sharper as more terms appear.'
+        if 'eigen' in lowered:
+            return 'Under diag(2, 1/2), the x-axis vector keeps its direction and doubles in length.'
+        return (
+            f'Choose the smallest concrete {domain.replace("_", " ")} example where the '
+            f'definition can be computed by hand, then record what remains invariant.'
+        )
+
+    def _checkpoints_for(self, concept: str, domain: str) -> str:
+        lowered = concept.lower()
+        if any(word in lowered for word in ['derivative', 'limit', 'integral']):
+            checks = [
+                'identify the variable that is changing',
+                'state the limiting or accumulating process',
+                'test one boundary case',
+            ]
+        elif any(word in lowered for word in ['matrix', 'eigen', 'vector']):
+            checks = [
+                'name the objects and dimensions',
+                'track what the transformation preserves',
+                'compare a generic vector with a special case',
+            ]
+        elif any(word in lowered for word in ['euler', 'complex', 'fourier']):
+            checks = [
+                'separate coordinates or frequencies',
+                'identify the invariant scale or period',
+                'verify the special value with a small computation',
+            ]
+        else:
+            checks = [
+                f'name the {domain.replace("_", " ")} objects',
+                'give a hand-checkable example',
+                'state one condition where the idea does not apply',
+            ]
+        return '; '.join(checks) + '.'
+
+    def _core_insight_for(self, concept: str, domain: str) -> str:
+        lowered = concept.lower()
+        if 'derivative' in lowered:
+            return (
+                'A derivative turns local change into a number. The key move is to replace '
+                'a visible average slope with the limiting tangent slope at one point.'
+            )
+        if 'limit' in lowered:
+            return (
+                'A limit is about forced nearby behavior. The value at the target point can '
+                'be missing or misleading; the surrounding values carry the claim.'
+            )
+        if 'integral' in lowered:
+            return (
+                'An integral turns many tiny contributions into one accumulated total. The '
+                'same structure explains area, distance, mass, probability, and work.'
+            )
+        if 'euler' in lowered:
+            return (
+                'Euler formula is rotation written in coordinates. At t=pi, the rotating '
+                'unit point reaches -1 on the real axis, which produces the identity.'
+            )
+        if 'matrix' in lowered:
+            return (
+                'Matrix multiplication is composition made computable. Each product entry '
+                'asks how one output coordinate depends on a row-column pairing.'
+            )
+        if 'fourier' in lowered:
+            return (
+                'A Fourier series separates a periodic shape into independent frequencies. '
+                'Adding terms reveals how simple waves can build sharp structure.'
+            )
+        if 'eigen' in lowered:
+            return (
+                'An eigenvector reveals a direction that survives a transformation. The '
+                'eigenvalue records the stretch, shrink, or flip along that direction.'
+            )
+        return (
+            f'The reusable insight is to name the {domain.replace("_", " ")} objects, '
+            'track the operation applied to them, and identify what remains meaningful '
+            'after the representation changes.'
+        )
+
+    def _misconception_for(self, concept: str, domain: str) -> str:
+        lowered = concept.lower()
+        if 'derivative' in lowered:
+            return 'Do not confuse the derivative with graph height; it measures local slope.'
+        if 'limit' in lowered:
+            return 'Do not require the function to be defined at the target point.'
+        if 'integral' in lowered:
+            return (
+                'Do not restrict integrals to geometric area when the same idea models '
+                'accumulation.'
+            )
+        if 'euler' in lowered:
+            return 'Do not treat e^(i*pi)+1=0 as numerology; it is a rotation statement.'
+        if 'matrix' in lowered:
+            return (
+                'Do not multiply entries position-by-position unless the operation is '
+                'explicitly Hadamard.'
+            )
+        if 'fourier' in lowered:
+            return (
+                'Do not read a Fourier series as arbitrary curve fitting; the frequencies '
+                'are orthogonal components.'
+            )
+        if 'eigen' in lowered:
+            return 'Do not expect every vector to be an eigenvector; most directions change.'
+        return (
+            f'Do not transfer a {domain.replace("_", " ")} result until the objects, '
+            'assumptions, and boundary cases have been checked.'
+        )
+
+    def _learning_questions_for(self, concept: str) -> list[str]:
+        lowered = concept.lower()
+        if 'derivative' in lowered:
+            return [
+                'What average rate is being refined into an instantaneous rate?',
+                'Which point is fixed and which point is allowed to move?',
+                'What does h represent before it goes to zero?',
+                'How can the tangent slope be checked with a small polynomial example?',
+            ]
+        if 'matrix' in lowered:
+            return [
+                'What are the input and output dimensions?',
+                'Which row and column produce each result entry?',
+                'What transformation or composition is represented?',
+                'Where would the calculation fail if the dimensions did not match?',
+            ]
+        if 'fourier' in lowered:
+            return [
+                'What periodic target is being approximated?',
+                'Which frequencies are added first and why?',
+                'How do the coefficients change the amplitude of each component?',
+                'What feature improves as more terms are included?',
+            ]
+        return [
+            f'What object does {concept} act on or describe?',
+            'What operation, limit, transformation, or accumulation is happening?',
+            'Which quantity stays meaningful while the representation changes?',
+            'What is the smallest example that exposes the mechanism?',
+        ]
+
+    def _animation_beats_for(self, concept: str) -> list[str]:
+        lowered = concept.lower()
+        if 'derivative' in lowered:
+            return [
+                'plot the curve and choose a base point',
+                'draw a secant line to a nearby moving point',
+                'shrink h while displaying the difference quotient',
+                'replace the secant with the tangent and label the derivative',
+                'summarize rate of change in one sentence',
+            ]
+        if 'euler' in lowered:
+            return [
+                'draw the complex plane and unit circle',
+                'start at 1 and label angle 0',
+                'rotate the point through pi radians',
+                'show cosine and sine coordinates updating',
+                'substitute t=pi and conclude e^(i*pi)=-1',
+            ]
+        if 'matrix' in lowered:
+            return [
+                'show A, B, and an empty result matrix',
+                'highlight one row and one column',
+                'multiply paired entries and sum them',
+                'write the result entry',
+                'repeat the pattern for the remaining entries',
+            ]
+        if 'fourier' in lowered:
+            return [
+                'show the target square wave',
+                'add the first sine term',
+                'add the third and fifth harmonics',
+                'increase the term count continuously',
+                'compare the final approximation with the target',
+            ]
+        return [
+            'introduce the object',
+            'show the operation or transformation',
+            'track the invariant or accumulated quantity',
+            'work through one concrete example',
+            'state the final takeaway',
+        ]
 
     def _generate_central_note(self, concept: str, domain: str, template: dict) -> ZettelNote:
         """Generate the central (hub) note for the cluster."""
@@ -321,6 +517,14 @@ class ZettelGenerator:
         fields_section = '\n'.join(
             f'### {field}\n\n{self._field_content(concept, field, domain)}\n'
             for field in template['central_fields']
+        )
+        learning_questions = '\n'.join(
+            f'- {question}'
+            for question in self._learning_questions_for(concept)
+        )
+        animation_beats = '\n'.join(
+            f'{index}. {beat}'
+            for index, beat in enumerate(self._animation_beats_for(concept), start=1)
         )
 
         content = f"""---
@@ -347,11 +551,31 @@ concept: "{concept}"
 thinking tool. This cluster separates the definition, intuition, examples, and
 connections so the idea can support both conversation and animation work.
 
+## Core Insight
+
+{self._core_insight_for(concept, domain)}
+
+## Learning Questions
+
+{learning_questions}
+
+## Working Example
+
+{self._example_for(concept, domain)}
+
+## Misconception To Guard Against
+
+{self._misconception_for(concept, domain)}
+
 {fields_section}
 
 ## Animations
 
 - [[{filename}-animation|Manim Animation]] — visual demonstration
+
+### Suggested Animation Beats
+
+{animation_beats}
 
 ## Connections
 
@@ -409,6 +633,16 @@ aspect: {field_name}
 {field_name} is useful for {concept} when it can be checked against a concrete
 example and then linked back to the central definition.
 
+## Practice Check
+
+Use the working example to test this note. If the example cannot show the claim,
+the note is too vague and should be split or rewritten.
+
+## Animation Cue
+
+Show this aspect as one visible change on screen, then pause long enough to label
+the object, operation, and invariant.
+
 ## Backlinks
 
 - [[{central_filename}|{concept}]]
@@ -441,6 +675,10 @@ _Related to [[{central_filename}]]_
         slug = self._slugify(concept)
         filename = f'zettel_{self.timestamp}_{slug}-storyline'
         title = f'{concept} - Storyline'
+        beat_sheet = '\n'.join(
+            f'{index}. {beat}'
+            for index, beat in enumerate(self._animation_beats_for(concept), start=1)
+        )
 
         content = f"""---
 id: {filename}
@@ -467,12 +705,18 @@ after the need for it is visible.
 1. State the problem in plain language.
 2. Show one concrete example or diagram.
 3. Introduce the notation and the core invariant.
-4. Connect the result to a neighboring concept or prior conversation.
+4. Work through the example one visible step at a time.
+5. Pause on the conceptual turning point.
+6. Connect the result to a neighboring concept or prior conversation.
 
 ## Animation Hook
 
 The Manim scene should reveal the same sequence visually: object, operation,
 invariant, and conclusion.
+
+## Beat Sheet
+
+{beat_sheet}
 
 ## Backlinks
 
@@ -512,11 +756,18 @@ connection_type: concept_bridge
 # {concept_a} connects to {concept_b}
 
 This note records why {concept_a} and {concept_b} belong in the same local map.
+Do not keep this bridge as a vague association: it should identify a reusable
+operation, analogy, or constraint.
 
 ## {concept_a} to {concept_b}
 
 Ask which structure in {concept_a} is reused by {concept_b}: a definition, a
 calculation pattern, an invariant, or a limiting process.
+
+## Transfer Example
+
+Take the smallest example from {concept_a} and ask what must change before it
+becomes an example of {concept_b}. The changed part reveals the real connection.
 
 ## {concept_b} to {concept_a}
 
@@ -529,4 +780,10 @@ example or counterexample from {concept_b} should clarify the scope of
 Both notes should identify objects, transformations, and invariants. Keep this
 bridge only if it helps move between the two concepts during problem solving or
 explanation.
+
+## Questions To Resolve
+
+- What is preserved across both concepts?
+- Which hypothesis appears in one concept but not the other?
+- Can one concept generate a counterexample for the other?
 """

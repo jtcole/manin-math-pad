@@ -7,15 +7,42 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+from manim_math_pad.engine.chat_service import MathChatService
 from manim_math_pad.engine.scene_generator import (
     SCENE_TEMPLATES,
     GeneratedScene,
     LLMSceneGenerator,
     SceneGenerator,
 )
+from manim_math_pad.engine.storyboard_generator import StoryboardGenerator
 from manim_math_pad.engine.renderer import ManimRenderer
 from manim_math_pad.engine.vault_exporter import VaultZettelExporter
 from manim_math_pad.engine.zettel_generator import ZettelGenerator
+
+
+class TestMathChatService:
+    """Test deterministic math chat responses."""
+
+    def test_known_concept_answer_has_explanation_sections(self):
+        turn = MathChatService(enable_llm_chat=False).respond(
+            'What is a derivative?',
+            context={'concepts': ['limits']},
+        )
+
+        assert 'Intuition:' in turn.answer
+        assert 'Formal handle:' in turn.answer
+        assert 'Concrete check:' in turn.answer
+        assert 'Common trap:' in turn.answer
+        assert 'For animation, I would break it into steps:' in turn.answer
+        assert 'Connection to this session:' in turn.answer
+        assert turn.concept == 'derivative'
+        assert turn.context['current_domain'] == 'calculus'
+
+    def test_unknown_concept_still_gets_animation_plan(self):
+        turn = MathChatService(enable_llm_chat=False).respond('Explain hypergraph coloring')
+
+        assert 'For animation, I would break it into steps:' in turn.answer
+        assert 'introduce the object' in turn.answer
 
 
 class TestSceneGenerator:
@@ -64,6 +91,12 @@ class TestSceneGenerator:
         """All template scenes should be syntactically valid Python."""
         for key, template in SCENE_TEMPLATES.items():
             compile(template['template'], f'<template:{key}>', 'exec')
+
+    def test_templates_include_multi_step_explanatory_cues(self):
+        for key, template in SCENE_TEMPLATES.items():
+            code = template['template']
+            assert 'Step ' in code, f'{key} should guide the viewer through steps'
+            assert 'run_time=' in code, f'{key} should control longer explanatory timing'
 
     def test_domain_matching(self):
         """Concepts should map to correct mathematical domains."""
@@ -187,6 +220,28 @@ class HypergraphColoringScene(Scene):
         assert result.scene_name == 'HypergraphColoringScene'
 
 
+class TestStoryboardGenerator:
+    """Test multi-clip storyboard generation."""
+
+    def test_known_concept_generates_connected_renderable_clips(self):
+        storyboard = StoryboardGenerator().generate(
+            'Explain derivative and connect it to limits',
+            context={'previous_concepts': ['limits']},
+        )
+
+        assert storyboard.concept == 'derivative'
+        assert storyboard.domain == 'calculus'
+        assert len(storyboard.clips) >= 4
+        assert 'limits' in storyboard.summary
+        assert storyboard.metadata['source'] == 'storyboard'
+        for index, clip in enumerate(storyboard.clips, start=1):
+            assert clip.index == index
+            assert f'Clip {index} of {len(storyboard.clips)}' in clip.scene_code
+            assert 'class ' in clip.scene_code
+            assert LLMSceneGenerator.extract_scene_name(clip.scene_code) == clip.scene_name
+            compile(clip.scene_code, f'<storyboard:{index}>', 'exec')
+
+
 class TestZettelGenerator:
     """Test the Obsidian zettel cluster generator."""
 
@@ -253,6 +308,14 @@ class TestZettelGenerator:
         assert '{{links}}' not in cluster.central_note.content
         assert any(note.metadata.get('type') == 'storyline' for note in cluster.notes)
         assert any(note.metadata.get('type') == 'connection' for note in cluster.notes)
+        assert '## Core Insight' in cluster.central_note.content
+        assert '## Learning Questions' in cluster.central_note.content
+        assert '## Working Example' in cluster.central_note.content
+        assert '## Misconception To Guard Against' in cluster.central_note.content
+        assert '### Suggested Animation Beats' in cluster.central_note.content
+        assert 'limiting tangent slope' in cluster.central_note.content
+        assert '## Beat Sheet' in joined
+        assert '## Questions To Resolve' in joined
 
 
 class TestManimRenderer:
