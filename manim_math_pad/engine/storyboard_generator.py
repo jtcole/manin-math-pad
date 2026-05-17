@@ -624,25 +624,18 @@ class {scene_name}(Scene):
         ).arrange(DOWN, buff=0.12)
         math_panel.next_to(visual, DOWN, buff=0.34)
 
-        narration = text_block(narration_lines, font_size=21, color=GREY_B)
-        narration.to_edge(DOWN).shift(UP * 0.72)
-
         check = VGroup(
-            fitted_text("Learner check", font_size=19, width=4.2, color=YELLOW),
-            fitted_text(learner_check, font_size=22, width=10.8),
+            fitted_text("Learner check", font_size=17, width=4.2, color=YELLOW),
+            fitted_text(learner_check, font_size=19, width=10.4),
         ).arrange(DOWN, buff=0.08)
-        check.to_edge(DOWN)
 
-        misconception = text_block(misconception_lines, font_size=20, color=GREY_B)
-        misconception.next_to(math_panel, DOWN, buff=0.24)
+        bottom_panel = VGroup(math_panel, check).arrange(DOWN, buff=0.16)
+        bottom_panel.to_edge(DOWN, buff=0.22)
 
         self.play(Write(header), FadeIn(progress), run_time=1.0)
         self.play(FadeIn(goal), Write(purpose), run_time=1.4)
 {action_code}
-        self.play(FadeIn(math_panel), run_time=1.2)
-        self.play(FadeIn(narration), run_time=1.2)
-        self.play(FadeIn(misconception), run_time=1.0)
-        self.play(FadeIn(check), run_time=1.0)
+        self.play(FadeIn(bottom_panel), run_time=1.2)
         self.wait(max(duration_seconds - 14.0, 3.0))
 '''.strip()
 
