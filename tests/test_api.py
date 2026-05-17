@@ -52,6 +52,47 @@ def test_session_creation_and_chat_answer(migrated_db):
     assert [message['role'] for message in messages] == ['user', 'assistant']
 
 
+def test_session_can_be_hidden_restored_and_deleted(migrated_db):
+    client = Client()
+    visible = post_json(client, '/api/manim/session/', {'title': 'Keep'}).json()
+    old = post_json(client, '/api/manim/session/', {'title': 'Old'}).json()
+
+    hidden = client.patch(
+        f'/api/manim/session/{old["uid"]}/',
+        data=json.dumps({'hidden': True}),
+        content_type='application/json',
+    )
+
+    assert hidden.status_code == 200
+    assert hidden.json()['is_hidden'] is True
+    assert hidden.json()['hidden_at']
+
+    listed = client.get('/api/manim/session/')
+    assert listed.status_code == 200
+    listed_uids = {session['uid'] for session in listed.json()['sessions']}
+    assert visible['uid'] in listed_uids
+    assert old['uid'] not in listed_uids
+
+    with_hidden = client.get('/api/manim/session/?include_hidden=1')
+    assert with_hidden.status_code == 200
+    with_hidden_uids = {session['uid'] for session in with_hidden.json()['sessions']}
+    assert old['uid'] in with_hidden_uids
+
+    restored = client.patch(
+        f'/api/manim/session/{old["uid"]}/',
+        data=json.dumps({'hidden': False}),
+        content_type='application/json',
+    )
+    assert restored.status_code == 200
+    assert restored.json()['is_hidden'] is False
+    assert restored.json()['hidden_at'] is None
+
+    deleted = client.delete(f'/api/manim/session/{old["uid"]}/')
+    assert deleted.status_code == 200
+    assert deleted.json() == {'deleted': True, 'uid': old['uid']}
+    assert not Session.objects.filter(uid=old['uid']).exists()
+
+
 def test_chat_can_queue_animation_and_create_zettel(migrated_db):
     client = Client()
     session_uid = post_json(client, '/api/manim/session/', {}).json()['uid']

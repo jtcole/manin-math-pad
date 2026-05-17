@@ -145,13 +145,19 @@ class SessionView(View):
 
     def get(self, request):
         """List recent sessions."""
-        sessions = Session.objects.order_by('-updated_at')[:20]
+        include_hidden = _truthy(request.GET.get('include_hidden'))
+        sessions = Session.objects.order_by('-updated_at')
+        if not include_hidden:
+            sessions = sessions.filter(hidden_at__isnull=True)
+        sessions = sessions[:20]
         data = [
             {
                 'uid': str(s.uid),
                 'title': s.title,
                 'created_at': s.created_at.isoformat(),
                 'updated_at': s.updated_at.isoformat(),
+                'hidden_at': s.hidden_at.isoformat() if s.hidden_at else None,
+                'is_hidden': bool(s.hidden_at),
                 'message_count': s.messages.count(),
             }
             for s in sessions
@@ -169,6 +175,7 @@ class SessionView(View):
             'uid': str(session.uid),
             'title': session.title,
             'created_at': session.created_at.isoformat(),
+            'hidden_at': session.hidden_at.isoformat() if session.hidden_at else None,
         }, status=201)
 
 
@@ -188,6 +195,8 @@ class SessionDetailView(View):
                 'title': session.title,
                 'created_at': session.created_at.isoformat(),
                 'updated_at': session.updated_at.isoformat(),
+                'hidden_at': session.hidden_at.isoformat() if session.hidden_at else None,
+                'is_hidden': bool(session.hidden_at),
                 'messages': [
                     {
                         'uid': str(message.uid),
@@ -218,6 +227,39 @@ class SessionDetailView(View):
                 ],
             }
         )
+
+    def patch(self, request, uid):
+        """Hide or restore a session without deleting its artifacts."""
+        body = _json_body(request)
+        try:
+            session = Session.objects.get(uid=uid)
+        except Session.DoesNotExist:
+            return JsonResponse({'error': 'Session not found'}, status=404)
+
+        if 'hidden' not in body:
+            return JsonResponse({'error': 'hidden is required'}, status=400)
+
+        hidden = _truthy(body.get('hidden'))
+        session.hidden_at = timezone.now() if hidden else None
+        session.save(update_fields=['hidden_at', 'updated_at'])
+        return JsonResponse(
+            {
+                'uid': str(session.uid),
+                'title': session.title,
+                'hidden_at': session.hidden_at.isoformat() if session.hidden_at else None,
+                'is_hidden': bool(session.hidden_at),
+            }
+        )
+
+    def delete(self, request, uid):
+        """Permanently delete a session and its messages/artifacts."""
+        try:
+            session = Session.objects.get(uid=uid)
+        except Session.DoesNotExist:
+            return JsonResponse({'error': 'Session not found'}, status=404)
+
+        session.delete()
+        return JsonResponse({'deleted': True, 'uid': str(uid)})
 
 
 @method_decorator(csrf_exempt, name='dispatch')

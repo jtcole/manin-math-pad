@@ -19,6 +19,7 @@ class Session(models.Model):
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
+    hidden_at = models.DateTimeField(null=True, blank=True)
     title = models.CharField(max_length=255, blank=True, default='')
     context = models.JSONField(
         default=dict,

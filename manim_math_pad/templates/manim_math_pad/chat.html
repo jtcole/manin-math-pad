@@ -66,7 +66,15 @@
     padding: 10px;
   }
 
+  .session-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+    align-items: stretch;
+  }
+
   .session-button {
+    min-width: 0;
     width: 100%;
     padding: 10px;
     text-align: left;
@@ -88,6 +96,30 @@
     margin-top: 4px;
     color: var(--muted);
     font-size: 12px;
+  }
+
+  .session-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .session-action {
+    width: 32px;
+    min-height: 28px;
+    padding: 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  .session-action:hover {
+    color: var(--text);
+  }
+
+  .session-action.danger:hover {
+    border-color: var(--warn);
+    color: var(--warn);
   }
 
   .chat-pane {
@@ -590,6 +622,9 @@
   function renderSessionList() {
     sessionList.innerHTML = "";
     state.sessions.forEach((session) => {
+      const row = document.createElement("div");
+      row.className = "session-row";
+
       const button = document.createElement("button");
       button.type = "button";
       button.className = "session-button";
@@ -604,7 +639,35 @@
       button.querySelector(".session-meta").textContent =
         `${session.message_count} messages - ${formatTime(session.updated_at)}`;
       button.addEventListener("click", () => loadSession(session.uid));
-      sessionList.appendChild(button);
+
+      const actions = document.createElement("div");
+      actions.className = "session-actions";
+
+      const hide = document.createElement("button");
+      hide.type = "button";
+      hide.className = "session-action";
+      hide.title = "Hide session";
+      hide.textContent = "Hide";
+      hide.addEventListener("click", (event) => {
+        event.stopPropagation();
+        hideSession(session.uid).catch((error) => setError(error.message));
+      });
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "session-action danger";
+      remove.title = "Delete session permanently";
+      remove.textContent = "Del";
+      remove.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteSession(session.uid).catch((error) => setError(error.message));
+      });
+
+      actions.appendChild(hide);
+      actions.appendChild(remove);
+      row.appendChild(button);
+      row.appendChild(actions);
+      sessionList.appendChild(row);
     });
   }
 
@@ -615,6 +678,49 @@
     });
     await loadSessions(false);
     await loadSession(data.uid);
+  }
+
+  async function selectFallbackSession() {
+    if (state.sessions.length) {
+      await loadSession(state.sessions[0].uid);
+      return;
+    }
+    state.currentSession = null;
+    activeTitle.textContent = "Session";
+    messageStream.innerHTML = "";
+    renderMessages();
+  }
+
+  async function hideSession(uid) {
+    setError("");
+    await api(`session/${uid}/`, {
+      method: "PATCH",
+      body: JSON.stringify({hidden: true}),
+    });
+    if (state.currentSession && state.currentSession.uid === uid) {
+      state.currentSession = null;
+    }
+    await loadSessions(false);
+    if (!state.currentSession || state.currentSession.uid === uid) {
+      await selectFallbackSession();
+    }
+  }
+
+  async function deleteSession(uid) {
+    const session = state.sessions.find((item) => item.uid === uid);
+    const label = session ? sessionTitle(session) : "this session";
+    if (!window.confirm(`Delete "${label}" and all generated artifacts?`)) {
+      return;
+    }
+    setError("");
+    await api(`session/${uid}/`, {method: "DELETE"});
+    if (state.currentSession && state.currentSession.uid === uid) {
+      state.currentSession = null;
+    }
+    await loadSessions(false);
+    if (!state.currentSession || state.currentSession.uid === uid) {
+      await selectFallbackSession();
+    }
   }
 
   async function loadSession(uid) {
