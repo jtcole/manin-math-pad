@@ -1,7 +1,6 @@
 """Generate pedagogical multi-clip Manim storyboards from math concepts."""
 from __future__ import annotations
 
-import textwrap
 from dataclasses import asdict, dataclass, field
 
 from .chat_service import MathChatService
@@ -556,11 +555,8 @@ class StoryboardGenerator:
         beat: StoryboardBeat,
         clip_count: int,
     ) -> str:
-        narration_lines = textwrap.wrap(beat.narration, width=68)[:3]
-        goal_lines = textwrap.wrap(lesson.learning_goal, width=68)[:2]
-        misconception_lines = textwrap.wrap(f'Misconception: {lesson.misconception}', width=68)[:2]
-        visual_code = self._visual_code(domain, concept)
-        action_code = self._visual_action_code(domain, concept)
+        visual_code = self._visual_code(domain, concept, beat)
+        action_code = self._visual_action_code(domain, concept, beat)
         return f'''
 from manim import *
 import math
@@ -571,82 +567,45 @@ class {scene_name}(Scene):
 
     def construct(self):
         concept = {concept!r}
-        clip_title = {beat.title!r}
         duration_seconds = {beat.duration_seconds!r}
-        goal_lines = {goal_lines!r}
-        narration_lines = {narration_lines!r}
-        misconception_lines = {misconception_lines!r}
-        visual_action = {beat.visual_action!r}
-        math_focus = {beat.math_focus!r}
-        learner_check = {beat.learner_check!r}
 
-        def fitted_text(value, font_size=30, width=11.2, color=WHITE):
+        def fitted_text(value, font_size=18, width=3.6, color=GREY_B):
             text = Text(value, font_size=font_size, color=color)
             if text.width > width:
                 text.scale_to_fit_width(width)
             return text
 
-        def text_block(lines, font_size=23, width=11.2, color=WHITE):
-            return VGroup(*[
-                fitted_text(line, font_size=font_size, width=width, color=color)
-                for line in lines
-            ]).arrange(DOWN, aligned_edge=LEFT, buff=0.1)
-
-        header = VGroup(
-            fitted_text(concept.title(), font_size=32, width=10.4),
-            fitted_text("Clip {beat.index} of {clip_count}: " + clip_title, font_size=24, width=10.8, color=YELLOW),
-        ).arrange(DOWN, buff=0.14)
-        header.to_edge(UP)
+        scene_tag = fitted_text(f"{{concept.title()}}  {beat.index}/{clip_count}", width=3.2)
+        scene_tag.to_corner(UL, buff=0.28)
+        scene_tag.set_opacity(0.62)
 
         progress = VGroup(*[
             Rectangle(
-                width=0.7,
-                height=0.09,
+                width=0.32,
+                height=0.045,
                 stroke_width=0,
                 fill_color=YELLOW if step <= {beat.index} else GREY,
-                fill_opacity=1 if step <= {beat.index} else 0.32,
+                fill_opacity=0.76 if step <= {beat.index} else 0.2,
             )
             for step in range(1, {clip_count + 1})
         ]).arrange(RIGHT, buff=0.08)
-        progress.next_to(header, DOWN, buff=0.18)
-
-        goal = text_block(goal_lines, font_size=21, color=GREY_B)
-        goal.next_to(progress, DOWN, buff=0.2)
-
-        purpose = fitted_text({beat.purpose!r}, font_size=24, width=11, color=BLUE)
-        purpose.next_to(goal, DOWN, buff=0.2)
+        progress.to_corner(UR, buff=0.32)
 
 {visual_code}
 
-        math_panel = VGroup(
-            fitted_text("Math focus", font_size=20, width=4.8, color=YELLOW),
-            fitted_text(math_focus, font_size=26, width=10.8),
-        ).arrange(DOWN, buff=0.12)
-        math_panel.next_to(visual, DOWN, buff=0.34)
-
-        check = VGroup(
-            fitted_text("Learner check", font_size=17, width=4.2, color=YELLOW),
-            fitted_text(learner_check, font_size=19, width=10.4),
-        ).arrange(DOWN, buff=0.08)
-
-        bottom_panel = VGroup(math_panel, check).arrange(DOWN, buff=0.16)
-        bottom_panel.to_edge(DOWN, buff=0.22)
-
-        self.play(Write(header), FadeIn(progress), run_time=1.0)
-        self.play(FadeIn(goal), Write(purpose), run_time=1.4)
+        self.play(FadeIn(scene_tag), FadeIn(progress), run_time=0.5)
 {action_code}
-        self.play(FadeIn(bottom_panel), run_time=1.2)
-        self.wait(max(duration_seconds - 14.0, 3.0))
+        self.wait(max(duration_seconds - 10.0, 3.0))
 '''.strip()
 
-    def _visual_code(self, domain: str, concept: str) -> str:
+    def _visual_code(self, domain: str, concept: str, beat: StoryboardBeat) -> str:
         lowered = concept.lower()
         if 'fourier' in lowered:
             return '''        axes = Axes(
             x_range=[-PI, PI, PI / 2],
             y_range=[-1.8, 1.8, 1],
-            x_length=5.6,
-            y_length=2.7,
+            x_length=8.4,
+            y_length=4.1,
             tips=False,
         )
         first_wave = axes.plot(lambda x: math.sin(x), x_range=[-PI, PI], color=BLUE)
@@ -660,8 +619,10 @@ class {scene_name}(Scene):
             Line(axes.c2p(0, 1), axes.c2p(PI, 1), color=GREEN),
             DashedLine(axes.c2p(0, -1), axes.c2p(0, 1), color=GREEN),
         )
-        visual = VGroup(axes, first_wave, harmonic_wave, target).scale(0.9)
-        visual.move_to(ORIGIN).shift(DOWN * 0.15)
+        component_label = Text("component waves", font_size=24, color=GREY_B)
+        component_label.next_to(axes, DOWN, buff=0.22)
+        visual = VGroup(axes, first_wave, harmonic_wave, target, component_label)
+        visual.move_to(ORIGIN).shift(DOWN * 0.08)
 '''
         if domain == 'calculus':
             return '''        h_tracker = ValueTracker(1.3)
@@ -673,8 +634,8 @@ class {scene_name}(Scene):
         axes = Axes(
             x_range=[-1, 3, 1],
             y_range=[-0.5, 4, 1],
-            x_length=5.3,
-            y_length=3.0,
+            x_length=7.6,
+            y_length=4.25,
             tips=False,
         )
         curve = axes.plot(y_value, x_range=[-0.7, 2.8], color=BLUE)
@@ -688,34 +649,60 @@ class {scene_name}(Scene):
         secant = always_redraw(lambda: Line(base.get_center(), moving.get_center(), color=GREEN))
         h_label = always_redraw(
             lambda: Text(f"h = {h_tracker.get_value():.2f}", font_size=22, color=YELLOW)
-            .next_to(moving, RIGHT, buff=0.14)
+            .next_to(moving, UR, buff=0.14)
         )
-        tangent = Line(axes.c2p(0.05, 0.15), axes.c2p(1.65, 1.65), color=YELLOW)
-        height_label = Text("height", font_size=22, color=GREY_B).next_to(base, LEFT, buff=0.15)
-        slope_label = Text("slope", font_size=24, color=YELLOW).next_to(tangent, UP, buff=0.12)
-        visual = VGroup(axes, curve, base, moving, secant, h_label).scale(0.9)
-        visual.move_to(ORIGIN).shift(DOWN * 0.15)
+        tangent = Line(axes.c2p(0.02, 0.16), axes.c2p(1.84, 1.88), color=YELLOW)
+        slope_label = Text("local slope", font_size=24, color=YELLOW)
+        slope_label.move_to(axes.c2p(1.72, 2.1))
+        height_line = DashedLine(
+            axes.c2p(base_x, 0),
+            axes.c2p(base_x, y_value(base_x)),
+            color=GREY_B,
+        )
+        height_label = Text("height", font_size=21, color=GREY_B)
+        height_label.next_to(height_line, DOWN, buff=0.12).shift(LEFT * 0.18)
+        slope_arrow = Arrow(
+            axes.c2p(0.55, 0.55),
+            axes.c2p(1.45, 1.4),
+            buff=0,
+            color=YELLOW,
+            stroke_width=5,
+        )
+        derivative_formula = MathTex(
+            r"f'(x)=\\lim_{h\\to 0}\\frac{f(x+h)-f(x)}{h}",
+            font_size=33,
+            color=YELLOW,
+        )
+        derivative_formula.to_edge(DOWN, buff=0.45)
+        example = VGroup(
+            MathTex(r"f(x)=x^2", font_size=30, color=GREY_B),
+            MathTex(r"\\frac{(3+h)^2-9}{h}=6+h", font_size=31, color=YELLOW),
+            MathTex(r"h\\to0\\quad\\Rightarrow\\quad f'(3)=6", font_size=31, color=YELLOW),
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.12)
+        example.to_corner(DR, buff=0.55)
+        visual = VGroup(axes, curve)
+        visual.move_to(ORIGIN).shift(DOWN * 0.05)
 '''
         if domain == 'linear_algebra':
-            return '''        matrix_a = Matrix([["1", "2"], ["3", "4"]]).scale(0.58).set_color(BLUE)
+            return '''        matrix_a = Matrix([["1", "2"], ["3", "4"]]).scale(0.72).set_color(BLUE)
         times = MathTex(r"\\times", font_size=38)
-        matrix_b = Matrix([["5", "6"], ["7", "8"]]).scale(0.58).set_color(GREEN)
+        matrix_b = Matrix([["5", "6"], ["7", "8"]]).scale(0.72).set_color(GREEN)
         equals = MathTex("=", font_size=38)
-        result = Matrix([["19", "22"], ["43", "50"]]).scale(0.58).set_color(YELLOW)
+        result = Matrix([["19", "22"], ["43", "50"]]).scale(0.72).set_color(YELLOW)
         group = VGroup(matrix_a, times, matrix_b, equals, result).arrange(RIGHT, buff=0.25)
         row_box = SurroundingRectangle(matrix_a.get_rows()[0], color=YELLOW, buff=0.06)
         col_box = SurroundingRectangle(matrix_b.get_columns()[0], color=YELLOW, buff=0.06)
         entry_box = SurroundingRectangle(result.get_entries()[0], color=YELLOW, buff=0.08)
         formula = Text("c11 = 1*5 + 2*7 = 19", font_size=28, color=YELLOW)
         formula.next_to(group, DOWN, buff=0.35)
-        visual = VGroup(group, row_box, col_box, entry_box, formula).scale(0.9)
-        visual.move_to(ORIGIN).shift(DOWN * 0.12)
+        visual = VGroup(group)
+        visual.move_to(ORIGIN)
 '''
         if domain == 'complex_analysis' or 'euler' in lowered:
             return '''        theta = ValueTracker(0)
-        circle = Circle(radius=1.25, color=BLUE)
-        real_axis = Line(LEFT * 1.65, RIGHT * 1.65, color=GREY)
-        imag_axis = Line(DOWN * 1.65, UP * 1.65, color=GREY)
+        circle = Circle(radius=1.85, color=BLUE)
+        real_axis = Line(LEFT * 2.25, RIGHT * 2.25, color=GREY)
+        imag_axis = Line(DOWN * 2.25, UP * 2.25, color=GREY)
         point = always_redraw(
             lambda: Dot(circle.point_at_angle(theta.get_value()), color=YELLOW)
         )
@@ -726,23 +713,23 @@ class {scene_name}(Scene):
             lambda: Text(f"t = {theta.get_value():.2f}", font_size=23, color=YELLOW)
             .next_to(circle, DOWN, buff=0.18)
         )
-        coordinate_label = Text("cos(pi)=-1, sin(pi)=0", font_size=25, color=YELLOW)
+        coordinate_label = MathTex(r"(-1,0)", font_size=36, color=YELLOW)
         coordinate_label.next_to(circle, RIGHT, buff=0.35)
         identity = MathTex(r"e^{i\\pi} + 1 = 0", font_size=42, color=YELLOW)
         identity.next_to(circle, DOWN, buff=0.45)
-        visual = VGroup(circle, real_axis, imag_axis, radius, point, angle_label, coordinate_label, identity)
-        visual.move_to(ORIGIN).shift(DOWN * 0.1)
+        visual = VGroup(circle, real_axis, imag_axis, radius, point)
+        visual.move_to(ORIGIN).shift(UP * 0.08)
 '''
-        return '''        source = Circle(radius=0.7, color=BLUE)
-        operation = Arrow(LEFT * 1.0, RIGHT * 1.0, color=YELLOW)
-        target = Square(side_length=1.2, color=GREEN).next_to(operation, RIGHT, buff=0.45)
+        return '''        source = Circle(radius=1.0, color=BLUE)
+        operation = Arrow(LEFT * 1.4, RIGHT * 1.4, color=YELLOW)
+        target = Square(side_length=1.55, color=GREEN).next_to(operation, RIGHT, buff=0.5)
         source.next_to(operation, LEFT, buff=0.45)
         invariant = Text("invariant", font_size=24, color=YELLOW).next_to(operation, UP)
         visual = VGroup(source, operation, target, invariant)
-        visual.move_to(ORIGIN).shift(DOWN * 0.1)
+        visual.move_to(ORIGIN)
 '''
 
-    def _visual_action_code(self, domain: str, concept: str) -> str:
+    def _visual_action_code(self, domain: str, concept: str, beat: StoryboardBeat) -> str:
         lowered = concept.lower()
         if 'fourier' in lowered:
             return '''        self.play(Create(axes), run_time=1.4)
@@ -751,6 +738,35 @@ class {scene_name}(Scene):
         self.play(Transform(first_wave.copy(), harmonic_wave), run_time=3.0)
 '''
         if domain == 'calculus':
+            if beat.index == 1:
+                return '''        self.play(Create(axes), Create(curve), run_time=2.0)
+        self.play(FadeIn(base), FadeIn(moving), Create(secant), FadeIn(h_label), run_time=1.8)
+        self.play(h_tracker.animate.set_value(0.72), run_time=3.2, rate_func=linear)
+'''
+            if beat.index == 2:
+                return '''        self.play(Create(axes), Create(curve), run_time=1.4)
+        self.play(FadeIn(base), FadeIn(moving), Create(secant), FadeIn(h_label), run_time=1.2)
+        self.play(h_tracker.animate.set_value(0.16), run_time=6.4, rate_func=linear)
+'''
+            if beat.index == 3:
+                return '''        self.play(Create(axes), Create(curve), run_time=1.4)
+        self.play(FadeIn(base), FadeIn(moving), Create(secant), FadeIn(h_label), run_time=1.1)
+        self.play(h_tracker.animate.set_value(0.16), run_time=4.6, rate_func=linear)
+        self.play(FadeOut(h_label), run_time=0.35)
+        self.play(Create(tangent), FadeIn(slope_label), FadeIn(derivative_formula), run_time=2.0)
+'''
+            if beat.index == 4:
+                return '''        self.play(Create(axes), Create(curve), run_time=1.5)
+        self.play(FadeIn(base), run_time=0.6)
+        self.play(FadeIn(example), Circumscribe(base), run_time=2.4)
+        self.play(Create(tangent), FadeIn(slope_label), run_time=1.5)
+'''
+            if beat.index == 5:
+                return '''        self.play(Create(axes), Create(curve), run_time=0.9)
+        self.play(FadeIn(base), Create(height_line), FadeIn(height_label), run_time=1.4)
+        self.play(Create(slope_arrow), Create(tangent), FadeIn(slope_label), run_time=2.0)
+        self.play(Indicate(height_label, color=GREY_B), Indicate(slope_label, color=YELLOW), run_time=1.5)
+'''
             return '''        self.play(Create(axes), Create(curve), run_time=2.0)
         self.play(FadeIn(base), FadeIn(moving), Create(secant), FadeIn(h_label), run_time=1.4)
         self.play(h_tracker.animate.set_value(0.16), run_time=5.4, rate_func=linear)

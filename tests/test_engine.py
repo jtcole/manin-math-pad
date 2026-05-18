@@ -240,11 +240,13 @@ class TestStoryboardGenerator:
         assert storyboard.metadata['storyboard_plan'][0]['learner_check']
         for index, clip in enumerate(storyboard.clips, start=1):
             assert clip.index == index
-            assert f'Clip {index} of {len(storyboard.clips)}' in clip.scene_code
+            assert f'{index}/{len(storyboard.clips)}' in clip.scene_code
             assert clip.duration_seconds >= 16
             assert clip.visual_action
             assert clip.math_focus
             assert clip.learner_check
+            assert 'Learner check' not in clip.scene_code
+            assert 'Math focus' not in clip.scene_code
             assert 'class ' in clip.scene_code
             assert LLMSceneGenerator.extract_scene_name(clip.scene_code) == clip.scene_name
             compile(clip.scene_code, f'<storyboard:{index}>', 'exec')
