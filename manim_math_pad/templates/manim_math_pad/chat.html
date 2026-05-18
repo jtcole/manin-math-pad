@@ -156,6 +156,7 @@
 
   .message-stream {
     display: flex;
+    min-width: 0;
     min-height: 0;
     flex-direction: column;
     gap: 14px;
@@ -197,6 +198,8 @@
 
   .artifact {
     width: min(760px, 100%);
+    max-width: 100%;
+    min-width: 0;
     border: 1px solid var(--line);
     border-radius: 8px;
     background: var(--panel);
@@ -207,7 +210,12 @@
     width: min(860px, 100%);
     display: grid;
     gap: 12px;
+    min-width: 0;
     padding: 14px;
+  }
+
+  .lesson-card > * {
+    min-width: 0;
   }
 
   .artifact-header {
@@ -246,6 +254,7 @@
   .lesson-player video {
     aspect-ratio: 16 / 9;
     max-height: 480px;
+    min-width: 0;
     object-fit: contain;
   }
 
@@ -290,6 +299,7 @@
   .lesson-markdown {
     display: grid;
     gap: 10px;
+    min-width: 0;
     color: var(--ink);
     line-height: 1.55;
   }
@@ -312,6 +322,7 @@
 
   .lesson-markdown p {
     font-size: 14px;
+    overflow-wrap: anywhere;
   }
 
   .lesson-details {
@@ -588,6 +599,37 @@
 
     .chat-pane {
       min-height: calc(100vh - 230px);
+    }
+
+    .message-stream {
+      padding: 14px;
+    }
+
+    .lesson-card {
+      width: 100%;
+      max-width: calc(100vw - 28px);
+      padding: 12px;
+      overflow: hidden;
+    }
+
+    .lesson-card .artifact-header {
+      align-items: flex-start;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+    }
+
+    .lesson-card .artifact-actions {
+      flex-wrap: wrap;
+      white-space: normal;
+    }
+
+    .lesson-player video {
+      max-height: none;
+    }
+
+    .lesson-stage {
+      min-height: 180px;
+      padding: 18px;
     }
 
     .input-row {
