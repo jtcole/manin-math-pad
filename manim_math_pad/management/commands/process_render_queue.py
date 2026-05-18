@@ -303,6 +303,13 @@ class Command(BaseCommand):
             output_dir / f'{storyboard.uid}.mp4',
             thumbnail_path=output_dir / f'{storyboard.uid}.jpg',
         )
+        captions_path = None
+        if result.success:
+            captions_path = output_dir / f'{storyboard.uid}.vtt'
+            captions_path.write_text(
+                self._storyboard_captions_vtt(clips, result.duration_seconds),
+                encoding='utf-8',
+            )
 
         metadata = storyboard.metadata or {}
         assemblies = metadata.get('assemblies') or []
@@ -310,6 +317,7 @@ class Command(BaseCommand):
             'status': 'completed' if result.success else 'failed',
             'video_path': str(result.video_path) if result.video_path else '',
             'thumbnail_path': str(result.thumbnail_path) if result.thumbnail_path else '',
+            'captions_path': str(captions_path) if captions_path else '',
             'duration_seconds': result.duration_seconds,
             'clip_count': len(clips),
             'error': result.error_message,
@@ -319,6 +327,7 @@ class Command(BaseCommand):
             {
                 'combined_video_path': assembly['video_path'],
                 'combined_thumbnail_path': assembly['thumbnail_path'],
+                'combined_captions_path': assembly['captions_path'],
                 'combined_duration_seconds': assembly['duration_seconds'],
                 'combined_status': assembly['status'],
                 'combined_error': assembly['error'],
@@ -327,3 +336,56 @@ class Command(BaseCommand):
         )
         storyboard.metadata = metadata
         storyboard.save(update_fields=['metadata'])
+
+    def _storyboard_captions_vtt(self, clips: list[Animation], duration_seconds: float | None) -> str:
+        lines = ['WEBVTT', '']
+        fallback_duration = 5.0
+        if duration_seconds and clips:
+            fallback_duration = max(float(duration_seconds) / len(clips), 1.0)
+
+        cursor = 0.0
+        for index, clip in enumerate(clips, start=1):
+            clip_duration = self._clip_caption_duration(clip, fallback_duration)
+            start = cursor
+            end = cursor + clip_duration
+            lines.extend(
+                [
+                    str(index),
+                    f'{self._vtt_time(start)} --> {self._vtt_time(end)}',
+                    self._clip_caption_text(clip),
+                    '',
+                ]
+            )
+            cursor = end
+        return '\n'.join(lines)
+
+    def _clip_caption_duration(self, clip: Animation, fallback_duration: float) -> float:
+        metadata = clip.metadata or {}
+        for value in [clip.duration_seconds, metadata.get('target_duration_seconds')]:
+            if value is None:
+                continue
+            try:
+                duration = float(value)
+            except (TypeError, ValueError):
+                continue
+            if duration > 0:
+                return duration
+        return fallback_duration
+
+    def _clip_caption_text(self, clip: Animation) -> str:
+        metadata = clip.metadata or {}
+        text = (
+            clip.clip_summary
+            or metadata.get('clip_purpose')
+            or metadata.get('clip_title')
+            or clip.clip_title
+            or clip.concept
+        )
+        return ' '.join(str(text).split())
+
+    def _vtt_time(self, seconds: float) -> str:
+        milliseconds = max(int(round(seconds * 1000)), 0)
+        hours, remainder = divmod(milliseconds, 3_600_000)
+        minutes, remainder = divmod(remainder, 60_000)
+        secs, millis = divmod(remainder, 1000)
+        return f'{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}'

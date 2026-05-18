@@ -930,11 +930,14 @@ def _storyboard_payload(storyboard: AnimationStoryboard, include_urls: bool = Fa
     if include_urls:
         combined_video_url = _media_url_for_path(metadata.get('combined_video_path'))
         combined_thumbnail_url = _media_url_for_path(metadata.get('combined_thumbnail_path'))
+        captions_url = _media_url_for_path(metadata.get('combined_captions_path'))
         if combined_video_url:
             data['combined_video_url'] = combined_video_url
             data['download_url'] = combined_video_url
         if combined_thumbnail_url:
             data['combined_thumbnail_url'] = combined_thumbnail_url
+        if captions_url:
+            data['captions_url'] = captions_url
     if metadata.get('combined_duration_seconds') is not None:
         data['duration_seconds'] = metadata.get('combined_duration_seconds')
     if metadata.get('combined_status'):

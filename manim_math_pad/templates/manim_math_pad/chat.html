@@ -114,7 +114,7 @@
   }
 
   .session-action:hover {
-    color: var(--text);
+    color: var(--ink);
   }
 
   .session-action.danger:hover {
@@ -203,6 +203,13 @@
     padding: 12px;
   }
 
+  .lesson-card {
+    width: min(860px, 100%);
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+  }
+
   .artifact-header {
     display: flex;
     align-items: center;
@@ -229,6 +236,99 @@
     max-height: 420px;
     border-radius: 6px;
     background: #101828;
+  }
+
+  .lesson-player {
+    display: grid;
+    gap: 8px;
+  }
+
+  .lesson-player video {
+    aspect-ratio: 16 / 9;
+    max-height: 480px;
+    object-fit: contain;
+  }
+
+  .lesson-stage {
+    display: grid;
+    min-height: 220px;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #101828;
+    color: #f8fafc;
+    padding: 24px;
+    text-align: center;
+  }
+
+  .lesson-stage strong {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 17px;
+  }
+
+  .lesson-stage span {
+    color: #d9e2ec;
+    font-size: 13px;
+  }
+
+  .lesson-meta-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .lesson-chip {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 8px;
+    background: #fbfcfd;
+  }
+
+  .lesson-markdown {
+    display: grid;
+    gap: 10px;
+    color: var(--ink);
+    line-height: 1.55;
+  }
+
+  .lesson-markdown h3,
+  .lesson-markdown h4,
+  .lesson-markdown p {
+    margin: 0;
+  }
+
+  .lesson-markdown h3 {
+    font-size: 18px;
+  }
+
+  .lesson-markdown h4 {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .lesson-markdown p {
+    font-size: 14px;
+  }
+
+  .lesson-details {
+    border-top: 1px solid var(--line);
+    padding-top: 10px;
+  }
+
+  .lesson-details > summary {
+    color: var(--accent-strong);
+    cursor: pointer;
+    font-weight: 650;
+  }
+
+  .lesson-details-body {
+    display: grid;
+    gap: 10px;
+    padding-top: 10px;
   }
 
   .storyboard-summary {
@@ -281,7 +381,7 @@
   }
 
   .plan-list b {
-    color: var(--text);
+    color: var(--ink);
   }
 
   .artifact-status {
@@ -448,7 +548,7 @@
     border-radius: 8px;
     background: var(--panel);
     font-size: 13px;
-    color: var(--text);
+    color: var(--ink);
     min-width: 180px;
   }
 
@@ -601,6 +701,86 @@
 
   function sessionTitle(session) {
     return session.title || "Untitled session";
+  }
+
+  function conceptTitle(value) {
+    const cleaned = String(value || "lesson").replace(/\s+/g, " ").trim();
+    return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : "Lesson";
+  }
+
+  function formatDuration(seconds) {
+    const total = Number(seconds);
+    if (!Number.isFinite(total) || total <= 0) {
+      return "";
+    }
+    const rounded = Math.round(total);
+    if (rounded < 60) {
+      return `${rounded}s`;
+    }
+    const minutes = Math.floor(rounded / 60);
+    const remainder = rounded % 60;
+    return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+  }
+
+  function compactValue(value) {
+    if (Array.isArray(value)) {
+      return value.filter(Boolean).join(", ");
+    }
+    return value || "";
+  }
+
+  function appendLessonBlock(container, label, value) {
+    const text = compactValue(value);
+    if (!text) {
+      return;
+    }
+    const block = document.createElement("div");
+    const heading = document.createElement("h4");
+    heading.textContent = label;
+    const body = document.createElement("p");
+    body.textContent = text;
+    block.appendChild(heading);
+    block.appendChild(body);
+    container.appendChild(block);
+  }
+
+  function appendPlanRow(container, label, value) {
+    const text = compactValue(value);
+    if (!text) {
+      return;
+    }
+    const row = document.createElement("div");
+    const strong = document.createElement("b");
+    strong.textContent = `${label}: `;
+    row.appendChild(strong);
+    row.appendChild(document.createTextNode(text));
+    container.appendChild(row);
+  }
+
+  function appendCaptions(video, captionsUrl) {
+    if (!captionsUrl) {
+      return;
+    }
+    const track = document.createElement("track");
+    track.kind = "captions";
+    track.label = "English captions";
+    track.srclang = "en";
+    track.src = captionsUrl;
+    video.appendChild(track);
+  }
+
+  function storyboardProgress(storyboard) {
+    const clips = storyboard.clips || [];
+    const completed = clips.filter((clip) => clip.status === "completed").length;
+    const failed = clips.filter((clip) => clip.status === "failed").length;
+    const canceled = clips.filter((clip) => clip.status === "canceled").length;
+    return {
+      clips,
+      completed,
+      failed,
+      canceled,
+      total: clips.length,
+    };
   }
 
   async function loadSessions(selectLatest = false) {
@@ -799,7 +979,7 @@
   function renderStoryboard(storyboard) {
     const existing = document.querySelector(`[data-storyboard-uid="${storyboard.uid}"]`);
     const card = existing || document.createElement("article");
-    card.className = "artifact";
+    card.className = "artifact lesson-card";
     card.dataset.storyboardUid = storyboard.uid;
     card.dataset.status = storyboard.status || "pending";
     card.innerHTML = "";
@@ -809,7 +989,7 @@
 
     const title = document.createElement("div");
     title.className = "artifact-title";
-    title.textContent = `${storyboard.concept} storyboard`;
+    title.textContent = `${conceptTitle(storyboard.concept)} lesson`;
     header.appendChild(title);
 
     const actions = document.createElement("div");
@@ -832,64 +1012,118 @@
     header.appendChild(actions);
     card.appendChild(header);
 
-    if (storyboard.summary) {
-      const summary = document.createElement("p");
-      summary.className = "storyboard-summary";
-      summary.textContent = storyboard.summary;
-      card.appendChild(summary);
-    }
-
     const metadata = storyboard.metadata || {};
     const lesson = metadata.lesson_plan || {};
-    const plan = document.createElement("div");
-    plan.className = "plan-list";
-    [
-      ["Goal", lesson.learning_goal],
-      ["Target", metadata.target_duration_seconds ? `${metadata.target_duration_seconds}s total` : ""],
-      ["Guard", lesson.misconception],
-    ].forEach(([label, value]) => {
-      if (!value) {
-        return;
-      }
-      const row = document.createElement("div");
-      row.innerHTML = `<b>${label}:</b> `;
-      row.appendChild(document.createTextNode(value));
-      plan.appendChild(row);
-    });
-    if (plan.childElementCount) {
-      card.appendChild(plan);
-    }
+    const progress = storyboardProgress(storyboard);
 
+    const player = document.createElement("section");
+    player.className = "lesson-player";
     if (storyboard.combined_video_url) {
-      const combined = document.createElement("div");
-      combined.className = "artifact-status";
-      const label = document.createElement("strong");
-      label.textContent = storyboard.duration_seconds
-        ? `Combined lesson video (${Math.round(storyboard.duration_seconds)}s)`
-        : "Combined lesson video";
       const video = document.createElement("video");
       video.controls = true;
+      video.preload = "metadata";
       video.src = storyboard.combined_video_url;
       if (storyboard.combined_thumbnail_url) {
         video.poster = storyboard.combined_thumbnail_url;
       }
-      combined.appendChild(label);
-      combined.appendChild(video);
-      card.appendChild(combined);
-    } else if (storyboard.combined_error) {
+      appendCaptions(video, storyboard.captions_url);
+      player.appendChild(video);
+    } else {
+      const stage = document.createElement("div");
+      stage.className = "lesson-stage";
+      const stageCopy = document.createElement("div");
+      const stageTitle = document.createElement("strong");
+      stageTitle.textContent = storyboard.combined_error
+        ? "Lesson video needs attention"
+        : "Building lesson video";
+      const stageMeta = document.createElement("span");
+      const rendered = progress.total
+        ? `${progress.completed}/${progress.total} clips rendered`
+        : "Queued for rendering";
+      stageMeta.textContent = storyboard.combined_error || rendered;
+      stageCopy.appendChild(stageTitle);
+      stageCopy.appendChild(stageMeta);
+      stage.appendChild(stageCopy);
+      player.appendChild(stage);
+    }
+    card.appendChild(player);
+
+    const metaStrip = document.createElement("div");
+    metaStrip.className = "lesson-meta-strip";
+    [
+      storyboard.status || "pending",
+      progress.total ? `${progress.completed}/${progress.total} clips` : "",
+      formatDuration(storyboard.duration_seconds || metadata.target_duration_seconds),
+      storyboard.captions_url ? "CC captions" : "",
+    ].forEach((value) => {
+      if (!value) {
+        return;
+      }
+      const chip = document.createElement("span");
+      chip.className = "lesson-chip";
+      chip.textContent = value;
+      metaStrip.appendChild(chip);
+    });
+    if (metaStrip.childElementCount) {
+      card.appendChild(metaStrip);
+    }
+
+    const lessonView = document.createElement("section");
+    lessonView.className = "lesson-markdown";
+    const lessonTitle = document.createElement("h3");
+    lessonTitle.textContent = conceptTitle(storyboard.concept);
+    lessonView.appendChild(lessonTitle);
+    appendLessonBlock(lessonView, "Overview", storyboard.summary);
+    appendLessonBlock(lessonView, "Learning goal", lesson.learning_goal);
+    appendLessonBlock(lessonView, "Example", lesson.example);
+    appendLessonBlock(lessonView, "Watch for", lesson.misconception);
+    appendLessonBlock(lessonView, "Takeaway", lesson.takeaway);
+    if (lessonView.childElementCount > 1) {
+      card.appendChild(lessonView);
+    }
+
+    const details = document.createElement("details");
+    details.className = "lesson-details";
+    const detailsSummary = document.createElement("summary");
+    detailsSummary.textContent = "Clip source and notes";
+    details.appendChild(detailsSummary);
+
+    const detailsBody = document.createElement("div");
+    detailsBody.className = "lesson-details-body";
+
+    const plan = document.createElement("div");
+    plan.className = "plan-list";
+    appendPlanRow(plan, "Target", metadata.target_duration_seconds
+      ? `${formatDuration(metadata.target_duration_seconds)} planned`
+      : "");
+    appendPlanRow(plan, "Prerequisites", lesson.prerequisites);
+    appendPlanRow(plan, "Domain", metadata.domain);
+    appendPlanRow(plan, "Source", metadata.source);
+    if (plan.childElementCount) {
+      detailsBody.appendChild(plan);
+    }
+
+    if (storyboard.combined_error) {
       const error = document.createElement("div");
       error.className = "artifact-error";
       error.textContent = storyboard.combined_error;
-      card.appendChild(error);
+      detailsBody.appendChild(error);
     }
 
     const clips = document.createElement("ol");
     clips.className = "storyboard-clips";
-    card.appendChild(clips);
 
-    (storyboard.clips || []).forEach((clip) => {
+    progress.clips.forEach((clip) => {
       clips.appendChild(renderStoryboardClip(clip));
     });
+    if (clips.childElementCount) {
+      detailsBody.appendChild(clips);
+    }
+
+    details.appendChild(detailsBody);
+    if (detailsBody.childElementCount) {
+      card.appendChild(details);
+    }
 
     if (!existing) {
       messageStream.appendChild(card);

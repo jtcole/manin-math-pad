@@ -202,6 +202,7 @@ def test_render_queue_assembles_completed_storyboard_clips(
         clip_index=1,
         clip_count=2,
         clip_title='Hook',
+        clip_summary='Start with the average slope between two nearby points.',
         status='completed',
     )
     completed.video_file.name = 'manim/animations/completed.mp4'
@@ -213,6 +214,7 @@ def test_render_queue_assembles_completed_storyboard_clips(
         clip_index=2,
         clip_count=2,
         clip_title='Visual',
+        clip_summary='Shrink the horizontal gap until the secant becomes a tangent.',
         scene_code=(
             'from manim import *\n\n'
             'class VisualScene(Scene):\n'
@@ -271,10 +273,17 @@ def test_render_queue_assembles_completed_storyboard_clips(
     assert storyboard.metadata['combined_status'] == 'completed'
     assert storyboard.metadata['combined_duration_seconds'] == 14.0
     assert storyboard.metadata['combined_video_path'].endswith(f'{storyboard.uid}.mp4')
+    assert storyboard.metadata['combined_captions_path'].endswith(f'{storyboard.uid}.vtt')
+    captions_path = media_root / 'manim' / 'storyboards' / f'{storyboard.uid}.vtt'
+    captions = captions_path.read_text(encoding='utf-8')
+    assert captions.startswith('WEBVTT')
+    assert 'Start with the average slope' in captions
+    assert 'Shrink the horizontal gap' in captions
 
     with override_settings(MEDIA_ROOT=str(media_root), MEDIA_URL='/media/'):
         payload = client_payload = Client().get(f'/api/manim/storyboard/{storyboard.uid}/').json()
     assert client_payload['combined_video_url'].endswith(f'{storyboard.uid}.mp4')
+    assert client_payload['captions_url'].endswith(f'{storyboard.uid}.vtt')
     assert payload['duration_seconds'] == 14.0
 
 
