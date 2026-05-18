@@ -30,6 +30,10 @@ Lesson JSON       → manim-pad render-lesson → clips + assembled MP4
 Lesson JSON       → manim-pad export-zettel → Obsidian-ready notes
 ```
 
+`lesson.json` follows `manim_math_pad/schemas/lesson.schema.json` and includes
+the teaching diagnosis, visual metaphor, clip director notes, narration,
+subtitles, Manim scene code, and zettel targets needed by MCP wrappers.
+
 ### Components
 
 | Component | Purpose |
@@ -83,7 +87,9 @@ pip install manim
 
 ```bash
 cd manim-math-pad
-pip install -e ".[dev]"
+pip install -e .
+pip install -e ".[render]"  # only when this environment should own Manim rendering deps
+pip install -e ".[dev]"     # tests + render deps for development
 ```
 
 ### Run Tests
@@ -128,6 +134,13 @@ Preview the render plan without invoking Manim:
 manim-pad render-lesson \
   --lesson /tmp/euler-lesson/lesson.json \
   --dry-run
+```
+
+Validate the artifact contract before handing it to another tool:
+
+```bash
+manim-pad validate-lesson \
+  --lesson /tmp/euler-lesson/lesson.json
 ```
 
 Render for real when Manim and ffmpeg are available:

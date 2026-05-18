@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codingenvironment.com/schemas/manim-math-pad/lesson.v2.json",
+  "title": "Manim Math Pad Lesson Artifact",
+  "description": "Stable lesson artifact contract for CLI Anything and MCP wrappers.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "schema_id",
+    "lesson_id",
+    "generated_at",
+    "concept",
+    "domain",
+    "summary",
+    "target_duration_seconds",
+    "lesson_plan",
+    "teaching_spec",
+    "beats",
+    "clips",
+    "subtitles",
+    "previous_concepts",
+    "metadata"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "schema_id": {
+      "const": "https://codingenvironment.com/schemas/manim-math-pad/lesson.v2.json"
+    },
+    "schema_path": {
+      "type": "string"
+    },
+    "lesson_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "concept": {
+      "type": "string",
+      "minLength": 1
+    },
+    "domain": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_duration_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "lesson_plan": {
+      "$ref": "#/$defs/lesson_plan"
+    },
+    "teaching_spec": {
+      "$ref": "#/$defs/teaching_spec"
+    },
+    "beats": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/beat"
+      }
+    },
+    "clips": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/clip"
+      }
+    },
+    "subtitles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/subtitle"
+      }
+    },
+    "previous_concepts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "conversation": {},
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "lesson_plan": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "concept",
+        "audience_level",
+        "learning_goal",
+        "prerequisites",
+        "misconception",
+        "example",
+        "takeaway"
+      ],
+      "properties": {
+        "concept": {
+          "type": "string"
+        },
+        "audience_level": {
+          "type": "string"
+        },
+        "learning_goal": {
+          "type": "string"
+        },
+        "prerequisites": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "misconception": {
+          "type": "string"
+        },
+        "example": {
+          "type": "string"
+        },
+        "takeaway": {
+          "type": "string"
+        }
+      }
+    },
+    "teaching_spec": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "diagnosis",
+        "visual_metaphor",
+        "explainer_style",
+        "narrative_arc",
+        "zettel_targets",
+        "clip_director_notes",
+        "artifact_contract"
+      ],
+      "properties": {
+        "diagnosis": {
+          "type": "object"
+        },
+        "visual_metaphor": {
+          "type": "string"
+        },
+        "explainer_style": {
+          "type": "object"
+        },
+        "narrative_arc": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "zettel_targets": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "clip_director_notes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/director_note"
+          }
+        },
+        "artifact_contract": {
+          "type": "object"
+        }
+      }
+    },
+    "beat": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "index",
+        "title",
+        "duration_seconds",
+        "purpose",
+        "visual_action",
+        "math_focus",
+        "narration",
+        "learner_check"
+      ]
+    },
+    "clip": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "index",
+        "title",
+        "objective",
+        "narration",
+        "scene_name",
+        "scene_code",
+        "duration_seconds",
+        "purpose",
+        "visual_action",
+        "math_focus",
+        "learner_check",
+        "metadata"
+      ]
+    },
+    "subtitle": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "index",
+        "start_seconds",
+        "end_seconds",
+        "text"
+      ]
+    },
+    "director_note": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "clip_index",
+        "title",
+        "subtitle",
+        "voiceover",
+        "visual_primitives",
+        "animation_actions",
+        "composition_notes",
+        "asset_needs",
+        "zettel_targets",
+        "code_entrypoint"
+      ]
+    }
+  }
+}

@@ -12,11 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from .engine.renderer import ManimRenderer
-from .engine.storyboard_generator import GeneratedStoryboard, StoryboardGenerator
+from .engine.storyboard_generator import GeneratedStoryboard, StoryboardClip, StoryboardGenerator
 from .engine.zettel_generator import ZettelGenerator
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+LESSON_SCHEMA_ID = 'https://codingenvironment.com/schemas/manim-math-pad/lesson.v2.json'
+LESSON_SCHEMA_PATH = Path(__file__).resolve().parent / 'schemas' / 'lesson.schema.json'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
             result = export_zettel_command(args)
         elif args.command == 'render-lesson':
             result = render_lesson_command(args)
+        elif args.command == 'validate-lesson':
+            result = validate_lesson_command(args)
         else:
             parser.error('a command is required')
             return 2
@@ -81,6 +85,12 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument('--manim-cmd', default='manim')
     render.add_argument('--dry-run', action='store_true')
 
+    validate = subparsers.add_parser(
+        'validate-lesson',
+        help='Validate lesson.json against the MCP-ready lesson contract.',
+    )
+    validate.add_argument('--lesson', type=Path, required=True, help='Path to lesson.json.')
+
     return parser
 
 
@@ -98,7 +108,7 @@ def plan_lesson_command(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def export_zettel_command(args: argparse.Namespace) -> dict[str, Any]:
-    lesson = _load_json(args.lesson)
+    lesson = _load_lesson(args.lesson)
     out_dir = args.out or args.lesson.parent
     zettel_dir = out_dir / 'zettel'
     zettel_dir.mkdir(parents=True, exist_ok=True)
@@ -136,7 +146,7 @@ def export_zettel_command(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def render_lesson_command(args: argparse.Namespace) -> dict[str, Any]:
-    lesson = _load_json(args.lesson)
+    lesson = _load_lesson(args.lesson)
     out_dir = args.out or args.lesson.parent
     clip_dir = out_dir / 'clips'
     rendered_dir = out_dir / 'rendered_clips'
@@ -204,6 +214,20 @@ def render_lesson_command(args: argparse.Namespace) -> dict[str, Any]:
     return manifest
 
 
+def validate_lesson_command(args: argparse.Namespace) -> dict[str, Any]:
+    lesson = _load_lesson(args.lesson)
+    return {
+        'ok': True,
+        'command': 'validate-lesson',
+        'lesson_id': lesson['lesson_id'],
+        'concept': lesson['concept'],
+        'schema_version': lesson['schema_version'],
+        'schema_id': lesson['schema_id'],
+        'clip_count': len(lesson['clips']),
+        'target_duration_seconds': lesson['target_duration_seconds'],
+    }
+
+
 def write_lesson_artifacts(
     lesson: dict[str, Any],
     out_dir: Path,
@@ -211,6 +235,7 @@ def write_lesson_artifacts(
     overwrite: bool = False,
 ) -> dict[str, Any]:
     """Write a planned lesson artifact folder and return a manifest."""
+    _raise_for_lesson_errors(lesson)
     if out_dir.exists() and any(out_dir.iterdir()) and not overwrite:
         raise CliError(f'output directory is not empty: {out_dir}')
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -239,6 +264,8 @@ def write_lesson_artifacts(
     manifest = {
         'ok': True,
         'command': 'plan-lesson',
+        'schema_version': lesson['schema_version'],
+        'schema_id': lesson['schema_id'],
         'lesson_id': lesson['lesson_id'],
         'concept': lesson['concept'],
         'domain': lesson['domain'],
@@ -296,6 +323,8 @@ def _lesson_payload(
 
     return {
         'schema_version': SCHEMA_VERSION,
+        'schema_id': LESSON_SCHEMA_ID,
+        'schema_path': str(LESSON_SCHEMA_PATH),
         'lesson_id': lesson_id,
         'generated_at': generated_at,
         'concept': storyboard.concept,
@@ -303,6 +332,7 @@ def _lesson_payload(
         'summary': storyboard.summary,
         'target_duration_seconds': storyboard.target_duration_seconds,
         'lesson_plan': asdict(storyboard.lesson_plan),
+        'teaching_spec': _teaching_spec(storyboard),
         'beats': [asdict(beat) for beat in storyboard.beats],
         'clips': clips,
         'subtitles': subtitles,
@@ -315,12 +345,14 @@ def _lesson_payload(
 def _storyboard_payload_for_file(lesson: dict[str, Any]) -> dict[str, Any]:
     return {
         'schema_version': lesson['schema_version'],
+        'schema_id': lesson['schema_id'],
         'lesson_id': lesson['lesson_id'],
         'concept': lesson['concept'],
         'domain': lesson['domain'],
         'summary': lesson['summary'],
         'target_duration_seconds': lesson['target_duration_seconds'],
         'lesson_plan': lesson['lesson_plan'],
+        'teaching_spec': lesson['teaching_spec'],
         'beats': lesson['beats'],
         'clips': [
             {
@@ -336,6 +368,7 @@ def _storyboard_payload_for_file(lesson: dict[str, Any]) -> dict[str, Any]:
 
 def _lesson_markdown(lesson: dict[str, Any]) -> str:
     plan = lesson['lesson_plan']
+    teaching = lesson['teaching_spec']
     lines = [
         f'# {lesson["concept"].title()}',
         '',
@@ -344,6 +377,13 @@ def _lesson_markdown(lesson: dict[str, Any]) -> str:
         '## Learning Goal',
         '',
         plan['learning_goal'],
+        '',
+        '## Teaching Diagnosis',
+        '',
+        f'- Learner question: {teaching["diagnosis"]["learner_question"]}',
+        f'- Assumed gap: {teaching["diagnosis"]["assumed_gap"]}',
+        f'- Target shift: {teaching["diagnosis"]["target_shift"]}',
+        f'- Visual metaphor: {teaching["visual_metaphor"]}',
         '',
         '## Prerequisites',
         '',
@@ -365,6 +405,7 @@ def _lesson_markdown(lesson: dict[str, Any]) -> str:
         '',
     ]
     for clip in lesson['clips']:
+        director = teaching['clip_director_notes'][clip['index'] - 1]
         lines.extend(
             [
                 f'### {clip["index"]}. {clip["title"]}',
@@ -374,12 +415,180 @@ def _lesson_markdown(lesson: dict[str, Any]) -> str:
                 f'- Visual action: {clip["visual_action"]}',
                 f'- Math focus: {clip["math_focus"]}',
                 f'- Learner check: {clip["learner_check"]}',
+                f'- Subtitle: {director["subtitle"]}',
+                f'- Visual primitives: {", ".join(director["visual_primitives"])}',
+                f'- Animation actions: {", ".join(director["animation_actions"])}',
                 '',
                 clip['narration'],
                 '',
             ]
         )
     return '\n'.join(lines).rstrip() + '\n'
+
+
+def _teaching_spec(storyboard: GeneratedStoryboard) -> dict[str, Any]:
+    """Create the bot/MCP-facing teaching spec from the planned storyboard."""
+    plan = storyboard.lesson_plan
+    return {
+        'diagnosis': {
+            'learner_question': f'What does {storyboard.concept} mean visually?',
+            'assumed_gap': _assumed_gap(storyboard.domain),
+            'misconception_to_surface': plan.misconception,
+            'target_shift': (
+                'Move the learner from symbol-recognition to a checkable visual model.'
+            ),
+        },
+        'visual_metaphor': _visual_metaphor(storyboard.concept, storyboard.domain),
+        'explainer_style': {
+            'inspiration': '3Blue1Brown-style geometric explainer',
+            'rules': [
+                'Introduce one object at a time.',
+                'Animate the mathematical action before naming the formula.',
+                'Keep equations close to the object they describe.',
+                'Use subtitles as narration, not as decorative labels.',
+                'End each clip with one checkable question.',
+            ],
+        },
+        'narrative_arc': [
+            'Anchor the object.',
+            'Animate the operation.',
+            'Expose the invariant or limiting relationship.',
+            'Work one small example.',
+            'Name the reusable takeaway.',
+        ],
+        'zettel_targets': _zettel_targets(storyboard.concept, storyboard.domain),
+        'clip_director_notes': [
+            _clip_director_note(storyboard.domain, storyboard.concept, clip)
+            for clip in storyboard.clips
+        ],
+        'artifact_contract': {
+            'lesson_markdown': 'lesson.md',
+            'lesson_json': 'lesson.json',
+            'storyboard_json': 'storyboard.json',
+            'captions': 'captions.vtt',
+            'clip_sources': 'clips/*.py',
+            'rendered_video': 'video.mp4',
+            'zettel_notes': 'zettel/*.md',
+        },
+    }
+
+
+def _assumed_gap(domain: str) -> str:
+    gaps = {
+        'calculus': 'The learner may know the formula but not the changing quantity.',
+        'linear_algebra': 'The learner may see arrays of numbers but not transformations.',
+        'complex_analysis': 'The learner may treat complex exponentials as symbolic tricks.',
+        'general': 'The learner may not yet know the object, operation, and invariant.',
+    }
+    return gaps.get(domain, gaps['general'])
+
+
+def _visual_metaphor(concept: str, domain: str) -> str:
+    lowered = concept.lower()
+    if 'derivative' in lowered:
+        return 'A secant line turning into a local speedometer for a curve.'
+    if 'limit' in lowered:
+        return 'Nearby points squeezing the output toward one forced value.'
+    if 'matrix' in lowered:
+        return 'Rows asking columns for weighted totals, one output cell at a time.'
+    if 'euler' in lowered:
+        return 'A point walking around the unit circle until a half-turn lands on -1.'
+    if 'fourier' in lowered:
+        return 'Simple rotating waves stacking into a complicated repeating shape.'
+    domain_metaphors = {
+        'linear_algebra': 'A transformation made visible by watching objects move together.',
+        'calculus': 'A changing quantity slowed down until the local rule becomes visible.',
+        'complex_analysis': 'Motion in the plane tracked by coordinates and angle.',
+    }
+    return domain_metaphors.get(domain, 'A named object, a visible action, and a stable takeaway.')
+
+
+def _zettel_targets(concept: str, domain: str) -> list[dict[str, str]]:
+    topic = concept.title()
+    return [
+        {
+            'title': topic,
+            'type': 'central',
+            'purpose': 'Define the concept and preserve the core visual insight.',
+        },
+        {
+            'title': f'{topic} Visual Model',
+            'type': 'atomic',
+            'purpose': 'Capture the geometric or procedural metaphor used in the lesson.',
+        },
+        {
+            'title': f'{topic} Common Misconception',
+            'type': 'atomic',
+            'purpose': 'Record the error the lesson is designed to prevent.',
+        },
+        {
+            'title': f'{topic} Worked Example',
+            'type': 'atomic',
+            'purpose': 'Keep a small hand-checkable computation linked to the animation.',
+        },
+        {
+            'title': f'{topic} Connections',
+            'type': 'connection',
+            'purpose': f'Connect this {domain.replace("_", " ")} lesson to nearby concepts.',
+        },
+    ]
+
+
+def _clip_director_note(domain: str, concept: str, clip: StoryboardClip) -> dict[str, Any]:
+    return {
+        'clip_index': clip.index,
+        'title': clip.title,
+        'subtitle': clip.narration,
+        'voiceover': clip.narration,
+        'visual_primitives': _visual_primitives(domain, concept, clip),
+        'animation_actions': _animation_actions(clip),
+        'composition_notes': (
+            'Use a stable header, leave equations in a fixed lower band, and keep the main '
+            'mathematical object centered with no overlapping text.'
+        ),
+        'asset_needs': _asset_needs(domain, concept),
+        'zettel_targets': [
+            concept.title(),
+            f'{concept.title()} Visual Model',
+            f'{concept.title()} Worked Example',
+        ],
+        'code_entrypoint': clip.scene_name,
+    }
+
+
+def _visual_primitives(domain: str, concept: str, clip: StoryboardClip) -> list[str]:
+    lowered = concept.lower()
+    if 'derivative' in lowered:
+        return ['axes', 'curve', 'two points', 'secant line', 'tangent line', 'slope label']
+    if 'matrix' in lowered:
+        return ['matrix A', 'matrix B', 'result matrix', 'row highlight', 'column highlight']
+    if 'euler' in lowered:
+        return ['complex plane', 'unit circle', 'rotating point', 'angle arc', 'coordinate labels']
+    if 'fourier' in lowered:
+        return ['target wave', 'component waves', 'summed waveform', 'frequency labels']
+    if domain == 'linear_algebra':
+        return ['basis grid', 'input vector', 'transformed vector', 'invariant label']
+    if domain == 'calculus':
+        return ['axes', 'function path', 'moving sample point', 'limit marker']
+    return ['main object', 'operation arrow', 'invariant highlight', 'takeaway label']
+
+
+def _animation_actions(clip: StoryboardClip) -> list[str]:
+    return [
+        'fade in the object before text',
+        clip.visual_action,
+        'highlight the math focus while narrating the subtitle',
+        'pause on the learner check',
+    ]
+
+
+def _asset_needs(domain: str, concept: str) -> list[str]:
+    lowered = concept.lower()
+    if 'fourier' in lowered:
+        return ['optional waveform audio/image reference for future richer renders']
+    if domain == 'general':
+        return ['optional domain-specific icon or sprite if the concept needs context']
+    return []
 
 
 def _captions_vtt(lesson: dict[str, Any]) -> str:
@@ -456,11 +665,145 @@ def _load_conversation(path: Path) -> dict[str, Any] | list[Any]:
     return _load_json(path)
 
 
+def _load_lesson(path: Path) -> dict[str, Any]:
+    payload = _load_json(path)
+    if not isinstance(payload, dict):
+        raise CliError(f'lesson file must contain a JSON object: {path}', exit_code=2)
+    _raise_for_lesson_errors(payload)
+    return payload
+
+
 def _load_json(path: Path) -> dict[str, Any] | list[Any]:
     try:
         return json.loads(path.read_text(encoding='utf-8'))
     except json.JSONDecodeError as exc:
         raise CliError(f'invalid JSON in {path}: {exc}', exit_code=2) from exc
+
+
+def _raise_for_lesson_errors(lesson: dict[str, Any]) -> None:
+    errors = validate_lesson_payload(lesson)
+    if errors:
+        raise CliError('lesson validation failed: ' + '; '.join(errors), exit_code=2)
+
+
+def validate_lesson_payload(lesson: dict[str, Any]) -> list[str]:
+    """Validate the lesson artifact contract without adding a runtime dependency."""
+    errors: list[str] = []
+    required = {
+        'schema_version': int,
+        'schema_id': str,
+        'lesson_id': str,
+        'generated_at': str,
+        'concept': str,
+        'domain': str,
+        'summary': str,
+        'target_duration_seconds': int,
+        'lesson_plan': dict,
+        'teaching_spec': dict,
+        'beats': list,
+        'clips': list,
+        'subtitles': list,
+        'previous_concepts': list,
+        'metadata': dict,
+    }
+    for field, expected_type in required.items():
+        if field not in lesson:
+            errors.append(f'missing field: {field}')
+            continue
+        if not isinstance(lesson[field], expected_type):
+            errors.append(f'{field} must be {expected_type.__name__}')
+
+    if errors:
+        return errors
+
+    if lesson['schema_version'] != SCHEMA_VERSION:
+        errors.append(f'schema_version must be {SCHEMA_VERSION}')
+    if lesson['schema_id'] != LESSON_SCHEMA_ID:
+        errors.append(f'schema_id must be {LESSON_SCHEMA_ID}')
+    if lesson['target_duration_seconds'] <= 0:
+        errors.append('target_duration_seconds must be positive')
+
+    plan_required = [
+        'concept',
+        'audience_level',
+        'learning_goal',
+        'prerequisites',
+        'misconception',
+        'example',
+        'takeaway',
+    ]
+    for field in plan_required:
+        if field not in lesson['lesson_plan']:
+            errors.append(f'lesson_plan missing field: {field}')
+
+    teaching = lesson['teaching_spec']
+    for field in [
+        'diagnosis',
+        'visual_metaphor',
+        'explainer_style',
+        'narrative_arc',
+        'zettel_targets',
+        'clip_director_notes',
+        'artifact_contract',
+    ]:
+        if field not in teaching:
+            errors.append(f'teaching_spec missing field: {field}')
+
+    clips = lesson['clips']
+    subtitles = lesson['subtitles']
+    director_notes = teaching.get('clip_director_notes', [])
+    if not clips:
+        errors.append('clips must not be empty')
+    if len(subtitles) != len(clips):
+        errors.append('subtitles length must match clips length')
+    if isinstance(director_notes, list) and len(director_notes) != len(clips):
+        errors.append('clip_director_notes length must match clips length')
+
+    total_duration = 0
+    for expected_index, clip in enumerate(clips, start=1):
+        if not isinstance(clip, dict):
+            errors.append(f'clip {expected_index} must be object')
+            continue
+        for field in [
+            'index',
+            'title',
+            'objective',
+            'narration',
+            'scene_name',
+            'scene_code',
+            'duration_seconds',
+            'purpose',
+            'visual_action',
+            'math_focus',
+            'learner_check',
+            'metadata',
+        ]:
+            if field not in clip:
+                errors.append(f'clip {expected_index} missing field: {field}')
+        if clip.get('index') != expected_index:
+            errors.append(f'clip {expected_index} index is not sequential')
+        duration = clip.get('duration_seconds')
+        if not isinstance(duration, int) or duration <= 0:
+            errors.append(f'clip {expected_index} duration_seconds must be positive integer')
+        else:
+            total_duration += duration
+        scene_code = str(clip.get('scene_code', ''))
+        if 'class ' not in scene_code or 'construct(self)' not in scene_code:
+            errors.append(f'clip {expected_index} scene_code must define a Manim Scene')
+
+    if total_duration and total_duration != lesson['target_duration_seconds']:
+        errors.append('target_duration_seconds must equal sum of clip durations')
+
+    for expected_index, subtitle in enumerate(subtitles, start=1):
+        if not isinstance(subtitle, dict):
+            errors.append(f'subtitle {expected_index} must be object')
+            continue
+        if subtitle.get('index') != expected_index:
+            errors.append(f'subtitle {expected_index} index is not sequential')
+        if not str(subtitle.get('text', '')).strip():
+            errors.append(f'subtitle {expected_index} text must not be empty')
+
+    return errors
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

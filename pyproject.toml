@@ -10,7 +10,6 @@ requires-python = ">=3.10"
 dependencies = [
     "django>=4.2",
     "djangorestframework>=3.14",
-    "manim>=0.18",
     "pyyaml>=6.0",
 ]
 
@@ -18,13 +17,20 @@ dependencies = [
 manim-pad = "manim_math_pad.cli:main"
 
 [project.optional-dependencies]
+render = [
+    "manim>=0.18",
+]
 dev = [
     "pytest>=7.0",
     "ruff>=0.4.0",
+    "manim>=0.18",
 ]
 
 [tool.ruff]
 line-length = 100
+
+[tool.setuptools.package-data]
+manim_math_pad = ["schemas/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
