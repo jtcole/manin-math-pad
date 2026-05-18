@@ -20,10 +20,21 @@ User → Chat API → Scene Generator → Manim Renderer → MP4/GIF
                   Zettel Generator → Obsidian Markdown cluster
 ```
 
+The app is moving toward a CLI-first artifact engine. The Django UI remains a
+viewer and demo surface, while `manim-pad` provides the stable contract that can
+be wrapped by CLI Anything or an MCP server.
+
+```
+Conversation JSON → manim-pad plan-lesson → lesson artifact folder
+Lesson JSON       → manim-pad render-lesson → clips + assembled MP4
+Lesson JSON       → manim-pad export-zettel → Obsidian-ready notes
+```
+
 ### Components
 
 | Component | Purpose |
 |---|---|
+| `cli.py` | Conversation/lesson artifact commands for bot and MCP use |
 | `engine/scene_generator.py` | Concept → Manim Python code (template + LLM) |
 | `engine/renderer.py` | Manim Python code → MP4/GIF video |
 | `engine/zettel_generator.py` | Concept → Obsidian zettel cluster |
@@ -79,6 +90,53 @@ pip install -e ".[dev]"
 
 ```bash
 pytest tests/test_engine.py -v
+```
+
+### CLI Artifact Workflow
+
+Install the package, then create a lesson artifact folder directly from a
+concept or conversation JSON:
+
+```bash
+manim-pad plan-lesson \
+  --concept "Explain Euler identity visually" \
+  --out /tmp/euler-lesson
+```
+
+The output folder contains:
+
+```text
+lesson.json
+lesson.md
+storyboard.json
+captions.vtt
+artifact_manifest.json
+clips/
+assets/
+```
+
+Export zettel markdown from the planned lesson:
+
+```bash
+manim-pad export-zettel \
+  --lesson /tmp/euler-lesson/lesson.json
+```
+
+Preview the render plan without invoking Manim:
+
+```bash
+manim-pad render-lesson \
+  --lesson /tmp/euler-lesson/lesson.json \
+  --dry-run
+```
+
+Render for real when Manim and ffmpeg are available:
+
+```bash
+manim-pad render-lesson \
+  --lesson /tmp/euler-lesson/lesson.json \
+  --quality low_quality \
+  --fps 15
 ```
 
 ### Django Integration
