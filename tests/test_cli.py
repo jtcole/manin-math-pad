@@ -46,9 +46,12 @@ def test_plan_lesson_writes_artifact_folder(tmp_path, capsys):
     assert lesson['concept'] == 'derivative'
     assert lesson['lesson_plan']['learning_goal'].startswith('Understand a derivative')
     assert lesson['teaching_spec']['diagnosis']['learner_question']
+    assert lesson['teaching_spec']['world_class_directive']['one_sentence_standard']
     assert lesson['teaching_spec']['visual_metaphor']
     assert lesson['teaching_spec']['clip_director_notes'][0]['visual_primitives']
     assert lesson['teaching_spec']['zettel_targets'][0]['type'] == 'central'
+    assert lesson['quality_gates'][0]['name'] == 'visual_first'
+    assert lesson['research_basis']
     assert lesson['subtitles'][0]['start_seconds'] == 0
 
 
@@ -118,6 +121,12 @@ def test_export_zettel_uses_lesson_json(tmp_path, capsys):
     assert manifest['note_count'] >= 4
     assert len(list((out_dir / 'zettel').glob('*.md'))) == manifest['note_count']
     assert (out_dir / 'zettel_manifest.json').exists()
+    note_text = '\n'.join(
+        path.read_text(encoding='utf-8')
+        for path in (out_dir / 'zettel').glob('*.md')
+    )
+    assert 'Lesson ID: `lesson-matrix`' in note_text
+    assert 'Media And Source' in note_text
 
 
 def test_validate_lesson_reports_contract_summary(tmp_path, capsys):

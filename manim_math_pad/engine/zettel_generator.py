@@ -193,9 +193,13 @@ class ZettelGenerator:
         session_context = session_context or {}
         domain = self._match_domain(concept)
         template = self.templates.get(domain, DEFAULT_TEMPLATE)
+        lesson = self._lesson_from_context(session_context, concept)
 
         # Central note
         central = self._generate_central_note(concept, domain, template)
+        if lesson:
+            central.content = self._inject_lesson_contract(central.content, lesson)
+            central.metadata['lesson_id'] = lesson.get('lesson_id')
         cluster = ZettelCluster(
             topic=concept,
             central_note=central,
@@ -214,6 +218,11 @@ class ZettelGenerator:
         storyline = self._generate_storyline_note(concept, domain, central.filename)
         cluster.notes.append(storyline)
         central.links.append(storyline.filename)
+
+        if lesson:
+            for note in self._generate_lesson_artifact_notes(lesson, domain, central.filename):
+                cluster.notes.append(note)
+                central.links.append(note.filename)
 
         # Context connections
         if session_context.get('previous_concepts'):
@@ -239,6 +248,249 @@ class ZettelGenerator:
 
         self._finalize_central_links(central)
         return cluster
+
+    def _lesson_from_context(self, session_context: dict, concept: str) -> dict | None:
+        """Extract a lesson artifact matching this concept from session context."""
+        lesson = session_context.get('lesson') or session_context.get('lesson_artifact')
+        if not isinstance(lesson, dict):
+            return None
+        lesson_concept = str(lesson.get('concept') or '').lower()
+        if lesson_concept and lesson_concept not in concept.lower() and concept.lower() not in lesson_concept:
+            return None
+        return lesson
+
+    def _inject_lesson_contract(self, content: str, lesson: dict) -> str:
+        """Add the shared lesson contract to the central note."""
+        plan = lesson.get('lesson_plan') or {}
+        teaching = lesson.get('teaching_spec') or {}
+        gates = lesson.get('quality_gates') or []
+        gate_lines = '\n'.join(
+            f'- {gate.get("name", "gate")}: {gate.get("check", "")}'
+            for gate in gates
+        ) or '- No quality gates recorded.'
+        lesson_block = f"""
+## Lesson Contract
+
+- Lesson ID: `{lesson.get('lesson_id', '')}`
+- Domain: {lesson.get('domain', 'general')}
+- Target duration: {lesson.get('target_duration_seconds', 0)} seconds
+- Visual model: {teaching.get('visual_metaphor', 'not recorded')}
+- Learning goal: {plan.get('learning_goal', 'not recorded')}
+- Worked example: {plan.get('example', 'not recorded')}
+- Misconception guard: {plan.get('misconception', 'not recorded')}
+
+### Publish Quality Gates
+
+{gate_lines}
+
+"""
+        return content.replace('## Connections', lesson_block + '## Connections')
+
+    def _generate_lesson_artifact_notes(
+        self,
+        lesson: dict,
+        domain: str,
+        central_filename: str,
+    ) -> list[ZettelNote]:
+        """Generate notes that preserve the lesson, media plan, and source paths."""
+        concept = str(lesson.get('concept') or 'math concept')
+        slug = self._slugify(concept)
+        lesson_id = str(lesson.get('lesson_id') or '')
+        teaching = lesson.get('teaching_spec') or {}
+        plan = lesson.get('lesson_plan') or {}
+        clips = lesson.get('clips') or []
+
+        lesson_note = ZettelNote(
+            title=f'{concept} - Lesson Plan',
+            filename=f'zettel_{self.timestamp}_{slug}-lesson-plan',
+            content=self._lesson_plan_note_content(lesson, central_filename),
+            tags=[domain, 'lesson', 'zettel'],
+            links=[central_filename],
+            metadata={'type': 'lesson_plan', 'domain': domain, 'lesson_id': lesson_id},
+        )
+        media_note = ZettelNote(
+            title=f'{concept} - Media And Source',
+            filename=f'zettel_{self.timestamp}_{slug}-media-source',
+            content=self._media_source_note_content(lesson, central_filename),
+            tags=[domain, 'media', 'manim', 'zettel'],
+            links=[central_filename],
+            metadata={'type': 'media_source', 'domain': domain, 'lesson_id': lesson_id},
+        )
+        visual_note = ZettelNote(
+            title=f'{concept} - Visual Model',
+            filename=f'zettel_{self.timestamp}_{slug}-visual-model',
+            content=f"""---
+id: zettel_{self.timestamp}_{slug}-visual-model
+created: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}
+modified: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}
+tags:
+  - {domain}
+  - visual-model
+  - zettel
+type: zettel
+domain: {domain}
+concept: "{concept}"
+lesson_id: "{lesson_id}"
+---
+
+# {concept} - Visual Model
+
+{teaching.get('visual_metaphor', self._core_insight_for(concept, domain))}
+
+## Why This Model Works
+
+{plan.get('learning_goal', self._core_insight_for(concept, domain))}
+
+## What To Watch
+
+{plan.get('misconception', self._misconception_for(concept, domain))}
+
+## Clip Evidence
+
+{self._clip_evidence_lines(clips)}
+
+## Backlinks
+
+- [[{central_filename}|{concept}]]
+""",
+            tags=[domain, 'visual-model', 'zettel'],
+            links=[central_filename],
+            metadata={'type': 'visual_model', 'domain': domain, 'lesson_id': lesson_id},
+        )
+        return [lesson_note, media_note, visual_note]
+
+    def _lesson_plan_note_content(self, lesson: dict, central_filename: str) -> str:
+        concept = str(lesson.get('concept') or 'math concept')
+        slug = self._slugify(concept)
+        domain = str(lesson.get('domain') or 'general')
+        lesson_id = str(lesson.get('lesson_id') or '')
+        plan = lesson.get('lesson_plan') or {}
+        teaching = lesson.get('teaching_spec') or {}
+        arc_lines = '\n'.join(
+            f'{index}. {item}'
+            for index, item in enumerate(teaching.get('narrative_arc') or [], start=1)
+        ) or '1. Build a concrete example, then name the reusable idea.'
+        clip_lines = '\n'.join(
+            f'{clip.get("index")}. {clip.get("title")} - {clip.get("narration")}'
+            for clip in lesson.get('clips') or []
+        )
+        return f"""---
+id: zettel_{self.timestamp}_{slug}-lesson-plan
+created: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}
+modified: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}
+tags:
+  - {domain}
+  - lesson
+  - zettel
+type: zettel
+domain: {domain}
+concept: "{concept}"
+lesson_id: "{lesson_id}"
+---
+
+# {concept} - Lesson Plan
+
+## Learner-Facing Summary
+
+{lesson.get('summary', self._core_insight_for(concept, domain))}
+
+## Learning Goal
+
+{plan.get('learning_goal', '')}
+
+## Narrative Arc
+
+{arc_lines}
+
+## Worked Example
+
+{plan.get('example', self._example_for(concept, domain))}
+
+## Misconception Guard
+
+{plan.get('misconception', self._misconception_for(concept, domain))}
+
+## Clip Plan
+
+{clip_lines}
+
+## Backlinks
+
+- [[{central_filename}|{concept}]]
+"""
+
+    def _media_source_note_content(self, lesson: dict, central_filename: str) -> str:
+        concept = str(lesson.get('concept') or 'math concept')
+        slug = self._slugify(concept)
+        domain = str(lesson.get('domain') or 'general')
+        lesson_id = str(lesson.get('lesson_id') or '')
+        contract = (lesson.get('teaching_spec') or {}).get('artifact_contract') or {}
+        artifact_lines = '\n'.join(
+            f'- {label}: `{path}`'
+            for label, path in contract.items()
+        ) or '- video.mp4, captions.vtt, and clips/*.py after render.'
+        source_lines = '\n'.join(
+            (
+                f'- Clip {clip.get("index")}: `{clip.get("scene_name")}` '
+                f'({clip.get("duration_seconds")}s)'
+            )
+            for clip in lesson.get('clips') or []
+        )
+        captions = '\n'.join(
+            (
+                f'- {subtitle.get("start_seconds")}s-{subtitle.get("end_seconds")}s: '
+                f'{subtitle.get("text")}'
+            )
+            for subtitle in lesson.get('subtitles') or []
+        )
+        return f"""---
+id: zettel_{self.timestamp}_{slug}-media-source
+created: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}
+modified: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}
+tags:
+  - {domain}
+  - manim
+  - media
+  - zettel
+type: zettel
+domain: {domain}
+concept: "{concept}"
+lesson_id: "{lesson_id}"
+---
+
+# {concept} - Media And Source
+
+This note keeps the reproducibility trail for the lesson video.
+
+## Artifact Contract
+
+{artifact_lines}
+
+## Manim Scene Entrypoints
+
+{source_lines}
+
+## Captions
+
+{captions}
+
+## Recreate
+
+Use `lesson.json` as the source of truth. Render the clips, assemble `video.mp4`,
+and keep `captions.vtt` beside the final video so captions can be toggled.
+
+## Backlinks
+
+- [[{central_filename}|{concept}]]
+"""
+
+    def _clip_evidence_lines(self, clips: list[dict]) -> str:
+        if not clips:
+            return '- No clips recorded.'
+        return '\n'.join(
+            f'- Clip {clip.get("index")}: {clip.get("visual_action")}'
+            for clip in clips
+        )
 
     def _finalize_central_links(self, central: ZettelNote) -> None:
         """Render collected wiki-links into the central note."""

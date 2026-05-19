@@ -111,7 +111,12 @@ def test_chat_can_queue_animation_and_create_zettel(migrated_db):
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload['lesson']['concept'] == 'matrix multiplication'
+    assert payload['lesson']['quality_gates'][0]['name'] == 'visual_first'
+    assert 'Visual model' in payload['message']
     assert payload['storyboard']['status'] == 'pending'
+    assert payload['storyboard']['lesson']['lesson_id'] == payload['lesson']['lesson_id']
+    assert payload['storyboard']['lesson_markdown'].startswith('# Matrix Multiplication')
     assert payload['storyboard']['clip_count'] >= 4
     assert payload['storyboard']['metadata']['target_duration_seconds'] >= 70
     assert payload['storyboard']['clips'][0]['clip_index'] == 1
@@ -190,7 +195,24 @@ def test_render_queue_assembles_completed_storyboard_clips(
         concept='derivative',
         summary='A lesson.',
         status='rendering',
-        metadata={},
+        metadata={
+            'lesson_artifact': {
+                'subtitles': [
+                    {
+                        'index': 1,
+                        'start_seconds': 0,
+                        'end_seconds': 5,
+                        'text': 'Lesson-contract caption one.',
+                    },
+                    {
+                        'index': 2,
+                        'start_seconds': 5,
+                        'end_seconds': 14,
+                        'text': 'Lesson-contract caption two.',
+                    },
+                ],
+            },
+        },
     )
     completed_path = media_root / 'manim' / 'animations' / 'completed.mp4'
     completed_path.parent.mkdir(parents=True, exist_ok=True)
@@ -277,8 +299,8 @@ def test_render_queue_assembles_completed_storyboard_clips(
     captions_path = media_root / 'manim' / 'storyboards' / f'{storyboard.uid}.vtt'
     captions = captions_path.read_text(encoding='utf-8')
     assert captions.startswith('WEBVTT')
-    assert 'Start with the average slope' in captions
-    assert 'Shrink the horizontal gap' in captions
+    assert 'Lesson-contract caption one.' in captions
+    assert 'Lesson-contract caption two.' in captions
 
     with override_settings(MEDIA_ROOT=str(media_root), MEDIA_URL='/media/'):
         payload = client_payload = Client().get(f'/api/manim/storyboard/{storyboard.uid}/').json()

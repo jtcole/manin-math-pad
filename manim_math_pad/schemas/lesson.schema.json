@@ -16,6 +16,8 @@
     "target_duration_seconds",
     "lesson_plan",
     "teaching_spec",
+    "research_basis",
+    "quality_gates",
     "beats",
     "clips",
     "subtitles",
@@ -61,6 +63,19 @@
     },
     "teaching_spec": {
       "$ref": "#/$defs/teaching_spec"
+    },
+    "research_basis": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "quality_gates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object"
+      }
     },
     "beats": {
       "type": "array",
@@ -139,6 +154,7 @@
       "additionalProperties": true,
       "required": [
         "diagnosis",
+        "world_class_directive",
         "visual_metaphor",
         "explainer_style",
         "narrative_arc",
@@ -148,6 +164,9 @@
       ],
       "properties": {
         "diagnosis": {
+          "type": "object"
+        },
+        "world_class_directive": {
           "type": "object"
         },
         "visual_metaphor": {

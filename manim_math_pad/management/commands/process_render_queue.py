@@ -303,15 +303,19 @@ class Command(BaseCommand):
             output_dir / f'{storyboard.uid}.mp4',
             thumbnail_path=output_dir / f'{storyboard.uid}.jpg',
         )
+        metadata = storyboard.metadata or {}
         captions_path = None
         if result.success:
             captions_path = output_dir / f'{storyboard.uid}.vtt'
             captions_path.write_text(
-                self._storyboard_captions_vtt(clips, result.duration_seconds),
+                self._storyboard_captions_vtt(
+                    clips,
+                    result.duration_seconds,
+                    lesson=metadata.get('lesson_artifact'),
+                ),
                 encoding='utf-8',
             )
 
-        metadata = storyboard.metadata or {}
         assemblies = metadata.get('assemblies') or []
         assembly = {
             'status': 'completed' if result.success else 'failed',
@@ -337,7 +341,15 @@ class Command(BaseCommand):
         storyboard.metadata = metadata
         storyboard.save(update_fields=['metadata'])
 
-    def _storyboard_captions_vtt(self, clips: list[Animation], duration_seconds: float | None) -> str:
+    def _storyboard_captions_vtt(
+        self,
+        clips: list[Animation],
+        duration_seconds: float | None,
+        lesson: dict | None = None,
+    ) -> str:
+        if isinstance(lesson, dict) and lesson.get('subtitles'):
+            return self._lesson_captions_vtt(lesson)
+
         lines = ['WEBVTT', '']
         fallback_duration = 5.0
         if duration_seconds and clips:
@@ -357,6 +369,22 @@ class Command(BaseCommand):
                 ]
             )
             cursor = end
+        return '\n'.join(lines)
+
+    def _lesson_captions_vtt(self, lesson: dict) -> str:
+        lines = ['WEBVTT', '']
+        for subtitle in lesson.get('subtitles') or []:
+            lines.extend(
+                [
+                    str(subtitle.get('index', '')),
+                    (
+                        f'{self._vtt_time(float(subtitle.get("start_seconds") or 0))} --> '
+                        f'{self._vtt_time(float(subtitle.get("end_seconds") or 0))}'
+                    ),
+                    ' '.join(str(subtitle.get('text') or '').split()),
+                    '',
+                ]
+            )
         return '\n'.join(lines)
 
     def _clip_caption_duration(self, clip: Animation, fallback_duration: float) -> float:

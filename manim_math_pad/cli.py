@@ -6,18 +6,22 @@ import json
 import re
 import sys
 import uuid
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .engine.lesson_planner import (
+    LESSON_SCHEMA_ID,
+    SCHEMA_VERSION,
+    LessonPlanner,
+    captions_vtt as render_captions_vtt,
+    lesson_markdown as render_lesson_markdown,
+    storyboard_payload_for_file as render_storyboard_payload,
+)
 from .engine.renderer import ManimRenderer
-from .engine.storyboard_generator import GeneratedStoryboard, StoryboardClip, StoryboardGenerator
 from .engine.zettel_generator import ZettelGenerator
 
 
-SCHEMA_VERSION = 2
-LESSON_SCHEMA_ID = 'https://codingenvironment.com/schemas/manim-math-pad/lesson.v2.json'
 LESSON_SCHEMA_PATH = Path(__file__).resolve().parent / 'schemas' / 'lesson.schema.json'
 
 
@@ -98,13 +102,16 @@ def plan_lesson_command(args: argparse.Namespace) -> dict[str, Any]:
     conversation = _load_conversation(args.conversation) if args.conversation else None
     concept = _concept_from_inputs(args.concept, conversation)
     context = _context_from_conversation(conversation)
-    storyboard = StoryboardGenerator(
+    planned = LessonPlanner(
         max_clips=args.max_clips,
         target_clip_seconds=args.target_clip_seconds,
-    ).generate(concept, context=context)
-    lesson_id = args.lesson_id or _lesson_id(storyboard.concept)
-    payload = _lesson_payload(storyboard, lesson_id, conversation)
-    return write_lesson_artifacts(payload, args.out, overwrite=args.overwrite)
+    ).plan(
+        concept,
+        context=context,
+        conversation=conversation,
+        lesson_id=args.lesson_id,
+    )
+    return write_lesson_artifacts(planned.payload, args.out, overwrite=args.overwrite)
 
 
 def export_zettel_command(args: argparse.Namespace) -> dict[str, Any]:
@@ -114,7 +121,10 @@ def export_zettel_command(args: argparse.Namespace) -> dict[str, Any]:
     zettel_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = args.timestamp or _timestamp_from_lesson(lesson)
-    context = {'previous_concepts': lesson.get('previous_concepts', [])}
+    context = {
+        'previous_concepts': lesson.get('previous_concepts', []),
+        'lesson': lesson,
+    }
     cluster = ZettelGenerator(timestamp=timestamp).generate(
         lesson['concept'],
         session_context=context,
@@ -251,9 +261,9 @@ def write_lesson_artifacts(
     manifest_path = out_dir / 'artifact_manifest.json'
 
     _write_json(lesson_path, lesson)
-    _write_json(storyboard_path, _storyboard_payload_for_file(lesson))
-    markdown_path.write_text(_lesson_markdown(lesson), encoding='utf-8')
-    captions_path.write_text(_captions_vtt(lesson), encoding='utf-8')
+    _write_json(storyboard_path, render_storyboard_payload(lesson))
+    markdown_path.write_text(render_lesson_markdown(lesson), encoding='utf-8')
+    captions_path.write_text(render_captions_vtt(lesson), encoding='utf-8')
 
     clip_paths = []
     for clip in lesson['clips']:
@@ -280,339 +290,6 @@ def write_lesson_artifacts(
     }
     _write_json(manifest_path, manifest)
     return manifest
-
-
-def _lesson_payload(
-    storyboard: GeneratedStoryboard,
-    lesson_id: str,
-    conversation: dict[str, Any] | list[Any] | None,
-) -> dict[str, Any]:
-    generated_at = datetime.now(timezone.utc).isoformat()
-    clips = []
-    for clip in storyboard.clips:
-        clips.append(
-            {
-                'index': clip.index,
-                'title': clip.title,
-                'objective': clip.objective,
-                'narration': clip.narration,
-                'scene_name': clip.scene_name,
-                'scene_code': clip.scene_code,
-                'duration_seconds': clip.duration_seconds,
-                'purpose': clip.purpose,
-                'visual_action': clip.visual_action,
-                'math_focus': clip.math_focus,
-                'learner_check': clip.learner_check,
-                'metadata': clip.metadata,
-            }
-        )
-    subtitles = []
-    cursor = 0
-    for clip in clips:
-        start = cursor
-        end = start + int(clip['duration_seconds'])
-        subtitles.append(
-            {
-                'index': clip['index'],
-                'start_seconds': start,
-                'end_seconds': end,
-                'text': clip['narration'],
-            }
-        )
-        cursor = end
-
-    return {
-        'schema_version': SCHEMA_VERSION,
-        'schema_id': LESSON_SCHEMA_ID,
-        'schema_path': str(LESSON_SCHEMA_PATH),
-        'lesson_id': lesson_id,
-        'generated_at': generated_at,
-        'concept': storyboard.concept,
-        'domain': storyboard.domain,
-        'summary': storyboard.summary,
-        'target_duration_seconds': storyboard.target_duration_seconds,
-        'lesson_plan': asdict(storyboard.lesson_plan),
-        'teaching_spec': _teaching_spec(storyboard),
-        'beats': [asdict(beat) for beat in storyboard.beats],
-        'clips': clips,
-        'subtitles': subtitles,
-        'previous_concepts': storyboard.metadata.get('previous_concepts', []),
-        'conversation': conversation,
-        'metadata': storyboard.metadata,
-    }
-
-
-def _storyboard_payload_for_file(lesson: dict[str, Any]) -> dict[str, Any]:
-    return {
-        'schema_version': lesson['schema_version'],
-        'schema_id': lesson['schema_id'],
-        'lesson_id': lesson['lesson_id'],
-        'concept': lesson['concept'],
-        'domain': lesson['domain'],
-        'summary': lesson['summary'],
-        'target_duration_seconds': lesson['target_duration_seconds'],
-        'lesson_plan': lesson['lesson_plan'],
-        'teaching_spec': lesson['teaching_spec'],
-        'beats': lesson['beats'],
-        'clips': [
-            {
-                key: value
-                for key, value in clip.items()
-                if key not in {'scene_code'}
-            }
-            for clip in lesson['clips']
-        ],
-        'subtitles': lesson['subtitles'],
-    }
-
-
-def _lesson_markdown(lesson: dict[str, Any]) -> str:
-    plan = lesson['lesson_plan']
-    teaching = lesson['teaching_spec']
-    lines = [
-        f'# {lesson["concept"].title()}',
-        '',
-        lesson['summary'],
-        '',
-        '## Learning Goal',
-        '',
-        plan['learning_goal'],
-        '',
-        '## Teaching Diagnosis',
-        '',
-        f'- Learner question: {teaching["diagnosis"]["learner_question"]}',
-        f'- Assumed gap: {teaching["diagnosis"]["assumed_gap"]}',
-        f'- Target shift: {teaching["diagnosis"]["target_shift"]}',
-        f'- Visual metaphor: {teaching["visual_metaphor"]}',
-        '',
-        '## Prerequisites',
-        '',
-        *[f'- {item}' for item in plan['prerequisites']],
-        '',
-        '## Misconception To Guard Against',
-        '',
-        plan['misconception'],
-        '',
-        '## Example',
-        '',
-        plan['example'],
-        '',
-        '## Takeaway',
-        '',
-        plan['takeaway'],
-        '',
-        '## Storyboard',
-        '',
-    ]
-    for clip in lesson['clips']:
-        director = teaching['clip_director_notes'][clip['index'] - 1]
-        lines.extend(
-            [
-                f'### {clip["index"]}. {clip["title"]}',
-                '',
-                f'- Duration: {clip["duration_seconds"]} seconds',
-                f'- Purpose: {clip["purpose"]}',
-                f'- Visual action: {clip["visual_action"]}',
-                f'- Math focus: {clip["math_focus"]}',
-                f'- Learner check: {clip["learner_check"]}',
-                f'- Subtitle: {director["subtitle"]}',
-                f'- Visual primitives: {", ".join(director["visual_primitives"])}',
-                f'- Animation actions: {", ".join(director["animation_actions"])}',
-                '',
-                clip['narration'],
-                '',
-            ]
-        )
-    return '\n'.join(lines).rstrip() + '\n'
-
-
-def _teaching_spec(storyboard: GeneratedStoryboard) -> dict[str, Any]:
-    """Create the bot/MCP-facing teaching spec from the planned storyboard."""
-    plan = storyboard.lesson_plan
-    return {
-        'diagnosis': {
-            'learner_question': f'What does {storyboard.concept} mean visually?',
-            'assumed_gap': _assumed_gap(storyboard.domain),
-            'misconception_to_surface': plan.misconception,
-            'target_shift': (
-                'Move the learner from symbol-recognition to a checkable visual model.'
-            ),
-        },
-        'visual_metaphor': _visual_metaphor(storyboard.concept, storyboard.domain),
-        'explainer_style': {
-            'inspiration': '3Blue1Brown-style geometric explainer',
-            'rules': [
-                'Introduce one object at a time.',
-                'Animate the mathematical action before naming the formula.',
-                'Keep equations close to the object they describe.',
-                'Use subtitles as narration, not as decorative labels.',
-                'End each clip with one checkable question.',
-            ],
-        },
-        'narrative_arc': [
-            'Anchor the object.',
-            'Animate the operation.',
-            'Expose the invariant or limiting relationship.',
-            'Work one small example.',
-            'Name the reusable takeaway.',
-        ],
-        'zettel_targets': _zettel_targets(storyboard.concept, storyboard.domain),
-        'clip_director_notes': [
-            _clip_director_note(storyboard.domain, storyboard.concept, clip)
-            for clip in storyboard.clips
-        ],
-        'artifact_contract': {
-            'lesson_markdown': 'lesson.md',
-            'lesson_json': 'lesson.json',
-            'storyboard_json': 'storyboard.json',
-            'captions': 'captions.vtt',
-            'clip_sources': 'clips/*.py',
-            'rendered_video': 'video.mp4',
-            'zettel_notes': 'zettel/*.md',
-        },
-    }
-
-
-def _assumed_gap(domain: str) -> str:
-    gaps = {
-        'calculus': 'The learner may know the formula but not the changing quantity.',
-        'linear_algebra': 'The learner may see arrays of numbers but not transformations.',
-        'complex_analysis': 'The learner may treat complex exponentials as symbolic tricks.',
-        'general': 'The learner may not yet know the object, operation, and invariant.',
-    }
-    return gaps.get(domain, gaps['general'])
-
-
-def _visual_metaphor(concept: str, domain: str) -> str:
-    lowered = concept.lower()
-    if 'derivative' in lowered:
-        return 'A secant line turning into a local speedometer for a curve.'
-    if 'limit' in lowered:
-        return 'Nearby points squeezing the output toward one forced value.'
-    if 'matrix' in lowered:
-        return 'Rows asking columns for weighted totals, one output cell at a time.'
-    if 'euler' in lowered:
-        return 'A point walking around the unit circle until a half-turn lands on -1.'
-    if 'fourier' in lowered:
-        return 'Simple rotating waves stacking into a complicated repeating shape.'
-    domain_metaphors = {
-        'linear_algebra': 'A transformation made visible by watching objects move together.',
-        'calculus': 'A changing quantity slowed down until the local rule becomes visible.',
-        'complex_analysis': 'Motion in the plane tracked by coordinates and angle.',
-    }
-    return domain_metaphors.get(domain, 'A named object, a visible action, and a stable takeaway.')
-
-
-def _zettel_targets(concept: str, domain: str) -> list[dict[str, str]]:
-    topic = concept.title()
-    return [
-        {
-            'title': topic,
-            'type': 'central',
-            'purpose': 'Define the concept and preserve the core visual insight.',
-        },
-        {
-            'title': f'{topic} Visual Model',
-            'type': 'atomic',
-            'purpose': 'Capture the geometric or procedural metaphor used in the lesson.',
-        },
-        {
-            'title': f'{topic} Common Misconception',
-            'type': 'atomic',
-            'purpose': 'Record the error the lesson is designed to prevent.',
-        },
-        {
-            'title': f'{topic} Worked Example',
-            'type': 'atomic',
-            'purpose': 'Keep a small hand-checkable computation linked to the animation.',
-        },
-        {
-            'title': f'{topic} Connections',
-            'type': 'connection',
-            'purpose': f'Connect this {domain.replace("_", " ")} lesson to nearby concepts.',
-        },
-    ]
-
-
-def _clip_director_note(domain: str, concept: str, clip: StoryboardClip) -> dict[str, Any]:
-    return {
-        'clip_index': clip.index,
-        'title': clip.title,
-        'subtitle': clip.narration,
-        'voiceover': clip.narration,
-        'visual_primitives': _visual_primitives(domain, concept, clip),
-        'animation_actions': _animation_actions(clip),
-        'composition_notes': (
-            'Use a stable header, leave equations in a fixed lower band, and keep the main '
-            'mathematical object centered with no overlapping text.'
-        ),
-        'asset_needs': _asset_needs(domain, concept),
-        'zettel_targets': [
-            concept.title(),
-            f'{concept.title()} Visual Model',
-            f'{concept.title()} Worked Example',
-        ],
-        'code_entrypoint': clip.scene_name,
-    }
-
-
-def _visual_primitives(domain: str, concept: str, clip: StoryboardClip) -> list[str]:
-    lowered = concept.lower()
-    if 'derivative' in lowered:
-        return ['axes', 'curve', 'two points', 'secant line', 'tangent line', 'slope label']
-    if 'matrix' in lowered:
-        return ['matrix A', 'matrix B', 'result matrix', 'row highlight', 'column highlight']
-    if 'euler' in lowered:
-        return ['complex plane', 'unit circle', 'rotating point', 'angle arc', 'coordinate labels']
-    if 'fourier' in lowered:
-        return ['target wave', 'component waves', 'summed waveform', 'frequency labels']
-    if domain == 'linear_algebra':
-        return ['basis grid', 'input vector', 'transformed vector', 'invariant label']
-    if domain == 'calculus':
-        return ['axes', 'function path', 'moving sample point', 'limit marker']
-    return ['main object', 'operation arrow', 'invariant highlight', 'takeaway label']
-
-
-def _animation_actions(clip: StoryboardClip) -> list[str]:
-    return [
-        'fade in the object before text',
-        clip.visual_action,
-        'highlight the math focus while narrating the subtitle',
-        'pause on the learner check',
-    ]
-
-
-def _asset_needs(domain: str, concept: str) -> list[str]:
-    lowered = concept.lower()
-    if 'fourier' in lowered:
-        return ['optional waveform audio/image reference for future richer renders']
-    if domain == 'general':
-        return ['optional domain-specific icon or sprite if the concept needs context']
-    return []
-
-
-def _captions_vtt(lesson: dict[str, Any]) -> str:
-    lines = ['WEBVTT', '']
-    for subtitle in lesson['subtitles']:
-        lines.extend(
-            [
-                str(subtitle['index']),
-                (
-                    f'{_vtt_time(subtitle["start_seconds"])} --> '
-                    f'{_vtt_time(subtitle["end_seconds"])}'
-                ),
-                subtitle['text'],
-                '',
-            ]
-        )
-    return '\n'.join(lines)
-
-
-def _vtt_time(seconds: int | float) -> str:
-    total = int(seconds)
-    hours, remainder = divmod(total, 3600)
-    minutes, secs = divmod(remainder, 60)
-    return f'{hours:02d}:{minutes:02d}:{secs:02d}.000'
 
 
 def _concept_from_inputs(
@@ -700,6 +377,8 @@ def validate_lesson_payload(lesson: dict[str, Any]) -> list[str]:
         'target_duration_seconds': int,
         'lesson_plan': dict,
         'teaching_spec': dict,
+        'research_basis': list,
+        'quality_gates': list,
         'beats': list,
         'clips': list,
         'subtitles': list,
@@ -739,6 +418,7 @@ def validate_lesson_payload(lesson: dict[str, Any]) -> list[str]:
     teaching = lesson['teaching_spec']
     for field in [
         'diagnosis',
+        'world_class_directive',
         'visual_metaphor',
         'explainer_style',
         'narrative_arc',

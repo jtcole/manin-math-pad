@@ -19,10 +19,14 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import Animation, AnimationStoryboard, Message, Session, ZettelCluster
-from .engine.chat_service import MathChatService
+from .engine.chat_service import ChatTurn, MathChatService
+from .engine.lesson_planner import (
+    LessonPlanner,
+    PlannedLesson,
+    public_lesson_payload,
+)
 from .engine.renderer import ManimRenderer
 from .engine.scene_generator import LLMSceneGenerator, SceneGenerator
-from .engine.storyboard_generator import StoryboardGenerator
 from .engine.vault_exporter import VaultZettelExporter
 from .engine.zettel_generator import ZettelGenerator
 
@@ -355,6 +359,12 @@ class ChatView(View):
 
         chat_service = MathChatService(chat_model=body.get('model'))
         chat_turn = chat_service.respond(content, session.context)
+        planned_lesson = _plan_lesson_from_turn(
+            chat_turn=chat_turn,
+            session=session,
+            latest_user_message=content,
+            body=body,
+        )
         scene_gen = SceneGenerator(
             enable_llm=_scene_llm_enabled(body),
             scene_model=body.get('model') or body.get('scene_model'),
@@ -381,7 +391,7 @@ class ChatView(View):
             )
         )
 
-        response_parts = [chat_turn.answer]
+        response_parts = [planned_lesson.answer_markdown]
 
         # Generate animation if requested
         animation = None
@@ -393,6 +403,7 @@ class ChatView(View):
                     concept=chat_turn.concept,
                     artifact_context=chat_turn.artifact_context,
                     body=body,
+                    planned_lesson=planned_lesson,
                 )
                 animation = storyboard.clips.order_by('clip_index', 'created_at').first()
                 response_parts.append(
@@ -421,7 +432,10 @@ class ChatView(View):
         if wants_zettel:
             cluster = zettel_gen.generate(
                 chat_turn.concept,
-                session_context=chat_turn.artifact_context,
+                session_context={
+                    **chat_turn.artifact_context,
+                    'lesson': planned_lesson.payload,
+                },
             )
             zettel = ZettelCluster.objects.create(
                 session=session,
@@ -457,7 +471,20 @@ class ChatView(View):
             content=response_text,
         )
 
-        session.context = chat_turn.context
+        lesson_history = [
+            *chat_turn.context.get('lesson_history', []),
+            {
+                'lesson_id': planned_lesson.payload['lesson_id'],
+                'concept': planned_lesson.payload['concept'],
+                'summary': planned_lesson.payload['summary'],
+            },
+        ][-10:]
+        session.context = {
+            **chat_turn.context,
+            'last_lesson_id': planned_lesson.payload['lesson_id'],
+            'last_lesson_summary': planned_lesson.payload['summary'],
+            'lesson_history': lesson_history,
+        }
         if not session.title:
             session.title = chat_turn.concept.title()[:255]
         session.save()
@@ -465,6 +492,7 @@ class ChatView(View):
         response_data = {
             'message': response_text,
             'session_uid': str(session.uid),
+            'lesson': public_lesson_payload(planned_lesson.payload),
         }
 
         if animation:
@@ -660,7 +688,18 @@ class ZettelView(View):
 
         zettel_gen = ZettelGenerator()
         artifact_context = MathChatService().artifact_context(session.context, topic)
-        cluster = zettel_gen.generate(topic, session_context=artifact_context)
+        planned_lesson = LessonPlanner().plan(
+            topic,
+            context=artifact_context,
+            conversation=_lesson_conversation_payload(session, topic),
+        )
+        cluster = zettel_gen.generate(
+            topic,
+            session_context={
+                **artifact_context,
+                'lesson': planned_lesson.payload,
+            },
+        )
 
         zettel = ZettelCluster.objects.create(
             session=session,
@@ -802,22 +841,70 @@ def _artifact_status_sentence(kind: str, status: str, concept: str) -> str:
     return f'{kind} queued for: {concept}'
 
 
-def _create_storyboard(
+def _plan_lesson_from_turn(
+    *,
+    chat_turn: ChatTurn,
     session: Session,
-    concept: str,
-    artifact_context: dict,
+    latest_user_message: str,
     body: dict,
-) -> AnimationStoryboard:
+) -> PlannedLesson:
     max_clips = _int_option(body, 'clip_count', _int_config('MANIM_STORYBOARD_MAX_CLIPS', 5))
     target_clip_seconds = _int_option(
         body,
         'target_clip_seconds',
         _int_config('MANIM_STORYBOARD_CLIP_SECONDS', 18),
     )
-    generated = StoryboardGenerator(
+    planner = LessonPlanner(
         max_clips=max_clips,
         target_clip_seconds=target_clip_seconds,
-    ).generate(concept, context=artifact_context)
+    )
+    return planner.plan(
+        chat_turn.concept,
+        context=chat_turn.artifact_context,
+        conversation=_lesson_conversation_payload(session, latest_user_message),
+    )
+
+
+def _lesson_conversation_payload(session: Session, latest_user_message: str) -> dict:
+    messages = [
+        {
+            'role': message.role,
+            'content': message.content,
+            'created_at': message.created_at.isoformat(),
+        }
+        for message in session.messages.order_by('-created_at')[:20]
+    ]
+    messages.reverse()
+    if not messages or messages[-1]['content'] != latest_user_message:
+        messages.append({'role': 'user', 'content': latest_user_message})
+    return {
+        'session_uid': str(session.uid),
+        'context': session.context,
+        'messages': messages,
+    }
+
+
+def _create_storyboard(
+    session: Session,
+    concept: str,
+    artifact_context: dict,
+    body: dict,
+    planned_lesson: PlannedLesson | None = None,
+) -> AnimationStoryboard:
+    if planned_lesson is None:
+        max_clips = _int_option(body, 'clip_count', _int_config('MANIM_STORYBOARD_MAX_CLIPS', 5))
+        target_clip_seconds = _int_option(
+            body,
+            'target_clip_seconds',
+            _int_config('MANIM_STORYBOARD_CLIP_SECONDS', 18),
+        )
+        planned_lesson = LessonPlanner(
+            max_clips=max_clips,
+            target_clip_seconds=target_clip_seconds,
+        ).plan(concept, context=artifact_context)
+
+    generated = planned_lesson.storyboard
+    lesson = planned_lesson.payload
     storyboard = AnimationStoryboard.objects.create(
         session=session,
         concept=generated.concept,
@@ -827,35 +914,48 @@ def _create_storyboard(
             **generated.metadata,
             'domain': generated.domain,
             'model': body.get('model') or body.get('scene_model'),
+            'lesson_id': lesson['lesson_id'],
+            'lesson_artifact': public_lesson_payload(lesson),
+            'lesson_markdown': planned_lesson.markdown,
+            'answer_markdown': planned_lesson.answer_markdown,
+            'quality_gates': lesson.get('quality_gates', []),
         },
     )
 
     clip_count = len(generated.clips)
-    for clip in generated.clips:
+    director_notes = lesson.get('teaching_spec', {}).get('clip_director_notes', [])
+    lesson_clips = lesson.get('clips', [])
+    for clip, lesson_clip in zip(generated.clips, lesson_clips, strict=False):
+        director_note = {}
+        if clip.index - 1 < len(director_notes):
+            director_note = director_notes[clip.index - 1]
         animation = Animation.objects.create(
             session=session,
             storyboard=storyboard,
             concept=generated.concept,
-            clip_index=clip.index,
+            clip_index=lesson_clip['index'],
             clip_count=clip_count,
-            clip_title=clip.title,
-            clip_summary=clip.narration,
-            scene_code=clip.scene_code,
+            clip_title=lesson_clip['title'],
+            clip_summary=lesson_clip['narration'],
+            scene_code=lesson_clip['scene_code'],
             status='pending',
             metadata={
                 'source': 'pedagogical_storyboard',
-                'scene_name': clip.scene_name,
+                'scene_name': lesson_clip['scene_name'],
                 'storyboard_uid': str(storyboard.uid),
-                'clip_index': clip.index,
+                'lesson_id': lesson['lesson_id'],
+                'clip_index': lesson_clip['index'],
                 'clip_count': clip_count,
-                'clip_title': clip.title,
-                'clip_objective': clip.objective,
-                'clip_purpose': clip.purpose,
-                'visual_action': clip.visual_action,
-                'math_focus': clip.math_focus,
-                'learner_check': clip.learner_check,
-                'target_duration_seconds': clip.duration_seconds,
-                'generation': clip.metadata,
+                'clip_title': lesson_clip['title'],
+                'clip_objective': lesson_clip['objective'],
+                'clip_purpose': lesson_clip['purpose'],
+                'visual_action': lesson_clip['visual_action'],
+                'math_focus': lesson_clip['math_focus'],
+                'learner_check': lesson_clip['learner_check'],
+                'target_duration_seconds': lesson_clip['duration_seconds'],
+                'director_note': director_note,
+                'quality_gates': lesson.get('quality_gates', []),
+                'generation': lesson_clip['metadata'],
             },
         )
         _maybe_render_inline(animation, body)
@@ -927,6 +1027,14 @@ def _storyboard_payload(storyboard: AnimationStoryboard, include_urls: bool = Fa
             for clip in clips
         ],
     }
+    if metadata.get('lesson_artifact'):
+        data['lesson'] = metadata.get('lesson_artifact')
+    if metadata.get('lesson_markdown'):
+        data['lesson_markdown'] = metadata.get('lesson_markdown')
+    if metadata.get('answer_markdown'):
+        data['answer_markdown'] = metadata.get('answer_markdown')
+    if metadata.get('quality_gates'):
+        data['quality_gates'] = metadata.get('quality_gates')
     if include_urls:
         combined_video_url = _media_url_for_path(metadata.get('combined_video_path'))
         combined_thumbnail_url = _media_url_for_path(metadata.get('combined_thumbnail_path'))

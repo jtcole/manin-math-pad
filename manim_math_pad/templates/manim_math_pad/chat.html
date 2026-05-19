@@ -1055,7 +1055,8 @@
     card.appendChild(header);
 
     const metadata = storyboard.metadata || {};
-    const lesson = metadata.lesson_plan || {};
+    const lessonArtifact = storyboard.lesson || metadata.lesson_artifact || {};
+    const lesson = lessonArtifact.lesson_plan || metadata.lesson_plan || {};
     const progress = storyboardProgress(storyboard);
 
     const player = document.createElement("section");
@@ -1115,7 +1116,7 @@
     const lessonTitle = document.createElement("h3");
     lessonTitle.textContent = conceptTitle(storyboard.concept);
     lessonView.appendChild(lessonTitle);
-    appendLessonBlock(lessonView, "Overview", storyboard.summary);
+    appendLessonBlock(lessonView, "Overview", lessonArtifact.summary || storyboard.summary);
     appendLessonBlock(lessonView, "Learning goal", lesson.learning_goal);
     appendLessonBlock(lessonView, "Example", lesson.example);
     appendLessonBlock(lessonView, "Watch for", lesson.misconception);
@@ -1135,8 +1136,10 @@
 
     const plan = document.createElement("div");
     plan.className = "plan-list";
-    appendPlanRow(plan, "Target", metadata.target_duration_seconds
-      ? `${formatDuration(metadata.target_duration_seconds)} planned`
+    appendPlanRow(plan, "Lesson", lessonArtifact.lesson_id || metadata.lesson_id);
+    const targetDuration = metadata.target_duration_seconds || lessonArtifact.target_duration_seconds;
+    appendPlanRow(plan, "Target", targetDuration
+      ? `${formatDuration(targetDuration)} planned`
       : "");
     appendPlanRow(plan, "Prerequisites", lesson.prerequisites);
     appendPlanRow(plan, "Domain", metadata.domain);
@@ -1150,6 +1153,18 @@
       error.className = "artifact-error";
       error.textContent = storyboard.combined_error;
       detailsBody.appendChild(error);
+    }
+
+    const qualityGates = storyboard.quality_gates || lessonArtifact.quality_gates || [];
+    if (qualityGates.length) {
+      const gateList = document.createElement("div");
+      gateList.className = "plan-list";
+      qualityGates.forEach((gate) => {
+        appendPlanRow(gateList, gate.name || "Quality gate", gate.check || "");
+      });
+      if (gateList.childElementCount) {
+        detailsBody.appendChild(gateList);
+      }
     }
 
     const clips = document.createElement("ol");
