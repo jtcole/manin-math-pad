@@ -17,6 +17,16 @@ from datetime import datetime, timezone
 # ─── Zettel cluster templates by domain ──────────────────────────────────────
 
 ZETTEL_TEMPLATES: dict[str, dict] = {
+    'special_functions': {
+        'central_fields': [
+            'Definition',
+            'Historical Problem',
+            'Functional Equation',
+            'Integral Model',
+            'Applications',
+        ],
+        'link_types': ['extends', 'interpolates', 'satisfies', 'represents', 'applies_to'],
+    },
     'calculus': {
         'central_fields': [
             'Definition',
@@ -166,6 +176,15 @@ class ZettelGenerator:
             ],
             'geometry': ['circle', 'triangle', 'polygon', 'conic', 'ellipse', 'pythagorean'],
             'algebra': ['group', 'ring', 'field', 'isomorphism', 'homomorphism', 'galois'],
+            'special_functions': [
+                'gamma function',
+                'gamma',
+                'factorial interpolation',
+                'factorial',
+                'euler integral',
+                'beta function',
+                'digamma',
+            ],
         }
 
         for domain, keywords in domain_keywords.items():
@@ -507,6 +526,8 @@ and keep `captions.vtt` beside the final video so captions can be toggled.
         field_key = field_name.lower()
         example = self._example_for(concept, domain)
         checkpoints = self._checkpoints_for(concept, domain)
+        if 'gamma' in concept.lower():
+            return self._gamma_field_content(field_key, example, checkpoints)
 
         if 'definition' in field_key or 'statement' in field_key:
             core = (
@@ -566,8 +587,50 @@ and keep `captions.vtt` beside the final video so captions can be toggled.
             f'Checks: {checkpoints}'
         )
 
+    def _gamma_field_content(self, field_key: str, example: str, checkpoints: str) -> str:
+        """Return populated note content for the gamma-function lesson cluster."""
+        if 'definition' in field_key:
+            core = (
+                'The gamma function extends the factorial pattern from isolated whole '
+                'numbers to a continuous input. The modern positive-input model is an '
+                'area under t^(x-1)e^(-t), and the crucial rule is Gamma(x+1)=x Gamma(x).'
+            )
+        elif 'historical' in field_key or 'intuition' in field_key:
+            core = (
+                'The original teaching problem is not "memorize a new special function." '
+                'It is: factorial gives 0!, 1!, 2!, 3!, and 4!, but calculus asks what '
+                'should happen at 2.5 or 1/2. The story begins with missing territory '
+                'between integer islands.'
+            )
+        elif 'functional' in field_key or 'formula' in field_key:
+            core = (
+                'The recurrence is the engine: Gamma(x+1)=x Gamma(x). It preserves the '
+                'factorial step n! = n(n-1)! while allowing x to slide continuously.'
+            )
+        elif 'integral' in field_key or 'visual' in field_key:
+            core = (
+                'Euler\'s integral turns the extension into an area machine. Changing x '
+                'changes the shape of t^(x-1)e^(-t); measuring the area gives Gamma(x).'
+            )
+        elif 'application' in field_key or 'connection' in field_key:
+            core = (
+                'Gamma becomes reusable because the same extension appears in probability '
+                'distributions, asymptotic estimates, beta integrals, and complex analysis.'
+            )
+        else:
+            core = (
+                'The note should keep one idea atomic: gamma is useful because it extends '
+                'factorial while preserving a rule, not because it merely connects dots.'
+            )
+        return f'{core}\n\nWorking example: {example}\n\nChecks: {checkpoints}'
+
     def _example_for(self, concept: str, domain: str) -> str:
         lowered = concept.lower()
+        if 'gamma' in lowered:
+            return (
+                'Gamma(5)=24 agrees with 4!, and Gamma(1/2)=sqrt(pi) shows that the '
+                'same rule produces meaningful between-integer values.'
+            )
         if 'derivative' in lowered:
             return 'For f(x)=x^2 at x=3, the secant slope is 6+h and the limiting slope is 6.'
         if 'limit' in lowered:
@@ -589,7 +652,13 @@ and keep `captions.vtt` beside the final video so captions can be toggled.
 
     def _checkpoints_for(self, concept: str, domain: str) -> str:
         lowered = concept.lower()
-        if any(word in lowered for word in ['derivative', 'limit', 'integral']):
+        if 'gamma' in lowered:
+            checks = [
+                'identify the factorial dots already known',
+                'state the recurrence Gamma(x+1)=x Gamma(x)',
+                'explain why matching dots alone is not enough',
+            ]
+        elif any(word in lowered for word in ['derivative', 'limit', 'integral']):
             checks = [
                 'identify the variable that is changing',
                 'state the limiting or accumulating process',
@@ -617,6 +686,12 @@ and keep `captions.vtt` beside the final video so captions can be toggled.
 
     def _core_insight_for(self, concept: str, domain: str) -> str:
         lowered = concept.lower()
+        if 'gamma' in lowered:
+            return (
+                'The gamma function solves the problem of extending factorial beyond whole '
+                'numbers. The visual move is to replace isolated factorial dots with an '
+                'area machine that still obeys the factorial step rule.'
+            )
         if 'derivative' in lowered:
             return (
                 'A derivative turns local change into a number. The key move is to replace '
@@ -660,6 +735,11 @@ and keep `captions.vtt` beside the final video so captions can be toggled.
 
     def _misconception_for(self, concept: str, domain: str) -> str:
         lowered = concept.lower()
+        if 'gamma' in lowered:
+            return (
+                'Do not treat gamma as just a smooth curve through factorial dots; the '
+                'recurrence, integral representation, and regularity constraints carry the idea.'
+            )
         if 'derivative' in lowered:
             return 'Do not confuse the derivative with graph height; it measures local slope.'
         if 'limit' in lowered:
@@ -690,6 +770,13 @@ and keep `captions.vtt` beside the final video so captions can be toggled.
 
     def _learning_questions_for(self, concept: str) -> list[str]:
         lowered = concept.lower()
+        if 'gamma' in lowered:
+            return [
+                'Which factorial values are already fixed before gamma is introduced?',
+                'What does the recurrence Gamma(x+1)=x Gamma(x) preserve?',
+                'How does Euler\'s integral turn a function value into an area?',
+                'Why does an arbitrary smooth curve through the same dots fail as an explanation?',
+            ]
         if 'derivative' in lowered:
             return [
                 'What average rate is being refined into an instantaneous rate?',
@@ -720,6 +807,14 @@ and keep `captions.vtt` beside the final video so captions can be toggled.
 
     def _animation_beats_for(self, concept: str) -> list[str]:
         lowered = concept.lower()
+        if 'gamma' in lowered:
+            return [
+                'plot factorial dots as isolated integer checkpoints',
+                'draw the gamma curve and show the recurrence ladder',
+                'switch to the Euler integral as a shaded area model',
+                'check integer values and the half-step value Gamma(1/2)',
+                'contrast with an arbitrary curve through the same dots',
+            ]
         if 'derivative' in lowered:
             return [
                 'plot the curve and choose a base point',

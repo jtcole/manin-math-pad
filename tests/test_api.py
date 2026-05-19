@@ -113,6 +113,7 @@ def test_chat_can_queue_animation_and_create_zettel(migrated_db):
     payload = response.json()
     assert payload['lesson']['concept'] == 'matrix multiplication'
     assert payload['lesson']['quality_gates'][0]['name'] == 'visual_first'
+    assert payload['lesson']['quality_review']['passed'] is True
     assert 'Visual model' in payload['message']
     assert payload['storyboard']['status'] == 'pending'
     assert payload['storyboard']['lesson']['lesson_id'] == payload['lesson']['lesson_id']
@@ -130,6 +131,35 @@ def test_chat_can_queue_animation_and_create_zettel(migrated_db):
 
     storyboard = AnimationStoryboard.objects.get(uid=payload['storyboard']['uid'])
     assert storyboard.clips.count() == payload['storyboard']['clip_count']
+
+
+def test_chat_gamma_prompt_produces_specific_lesson(migrated_db):
+    client = Client()
+    session_uid = post_json(client, '/api/manim/session/', {}).json()['uid']
+
+    response = post_json(
+        client,
+        '/api/manim/chat/',
+        {
+            'session_uid': session_uid,
+            'message': (
+                'how was the gamma function discovered what problem did it solve '
+                'what new problems did it create'
+            ),
+            'animate': False,
+            'zettel': True,
+            'enable_llm': False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['lesson']['concept'] == 'gamma function'
+    assert payload['lesson']['domain'] == 'special_functions'
+    assert payload['lesson']['quality_review']['passed'] is True
+    assert 'factorial' in payload['message'].lower()
+    assert 'area machine' in payload['lesson']['teaching_spec']['visual_metaphor']
+    assert payload['zettel']['status'] == 'completed'
 
 
 def test_storyboard_endpoint_queues_connected_clip_jobs(migrated_db):

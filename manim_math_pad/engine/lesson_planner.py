@@ -145,6 +145,7 @@ def lesson_payload(
     subtitles = subtitle_payloads(clips)
     teaching_spec = teaching_spec_for_storyboard(storyboard)
     quality_gates = quality_gates_for_storyboard(storyboard)
+    quality_review = quality_review_for_storyboard(storyboard)
 
     return {
         'schema_version': SCHEMA_VERSION,
@@ -159,6 +160,7 @@ def lesson_payload(
         'teaching_spec': teaching_spec,
         'research_basis': RESEARCH_BASIS,
         'quality_gates': quality_gates,
+        'quality_review': quality_review,
         'beats': [asdict(beat) for beat in storyboard.beats],
         'clips': clips,
         'subtitles': subtitles,
@@ -168,6 +170,7 @@ def lesson_payload(
             **storyboard.metadata,
             'lesson_id': lesson_id,
             'quality_gates': quality_gates,
+            'quality_review': quality_review,
         },
     }
 
@@ -288,6 +291,14 @@ def quality_gates_for_storyboard(storyboard: GeneratedStoryboard) -> list[dict[s
             'evidence': 'Scene code avoids persistent goal/purpose/check panels.',
         },
         {
+            'name': 'concept_specificity',
+            'check': 'The plan names a precise mathematical problem, not the raw user prompt.',
+            'evidence': (
+                f'{storyboard.concept} in {storyboard.domain.replace("_", " ")}; '
+                f'goal: {storyboard.lesson_plan.learning_goal}'
+            ),
+        },
+        {
             'name': 'caption_not_wall_text',
             'check': 'Narration lives in captions and short local labels, not paragraphs.',
             'evidence': f'{len(storyboard.clips)} subtitle cues are generated from clip narration.',
@@ -308,6 +319,61 @@ def quality_gates_for_storyboard(storyboard: GeneratedStoryboard) -> list[dict[s
             'evidence': 'teaching_spec.zettel_targets and artifact_contract are populated.',
         },
     ]
+
+
+def quality_review_for_storyboard(storyboard: GeneratedStoryboard) -> dict[str, Any]:
+    """Evaluate whether a storyboard avoids the generic/generated-lesson failure mode."""
+    concept_words = storyboard.concept.split()
+    raw_prompt_smell = any(
+        marker in storyboard.concept.lower()
+        for marker in ['how was', 'what problem', 'what new', 'please ', '?']
+    )
+    source_text = '\n'.join(clip.scene_code for clip in storyboard.clips)
+    banned_panels = ['Learner check', 'Math focus', 'Learning goal', 'Purpose:']
+    max_text_calls = max(clip.scene_code.count('Text(') for clip in storyboard.clips)
+    checks = [
+        {
+            'name': 'precise_concept',
+            'passed': (
+                bool(storyboard.concept.strip())
+                and len(concept_words) <= 5
+                and not raw_prompt_smell
+                and storyboard.domain != 'general'
+            ),
+            'evidence': f'{storyboard.concept} / {storyboard.domain}',
+        },
+        {
+            'name': 'narrative_progression',
+            'passed': len(storyboard.beats) >= 4
+            and all(beat.purpose and beat.visual_action and beat.learner_check for beat in storyboard.beats),
+            'evidence': f'{len(storyboard.beats)} beats with purpose, visual action, and learner checks',
+        },
+        {
+            'name': 'low_on_screen_text',
+            'passed': all(label not in source_text for label in banned_panels) and max_text_calls <= 14,
+            'evidence': f'max Text() calls per clip: {max_text_calls}; banned panels absent',
+        },
+        {
+            'name': 'concrete_example',
+            'passed': any(char.isdigit() for char in storyboard.lesson_plan.example),
+            'evidence': storyboard.lesson_plan.example,
+        },
+        {
+            'name': 'captioned_single_lesson',
+            'passed': storyboard.target_duration_seconds >= 70 and len(storyboard.clips) >= 4,
+            'evidence': (
+                f'{storyboard.target_duration_seconds}s target across '
+                f'{len(storyboard.clips)} clips'
+            ),
+        },
+    ]
+    passed = all(bool(check['passed']) for check in checks)
+    return {
+        'standard': 'visual-story explainer quality review',
+        'passed': passed,
+        'grade': 'ready_for_render_qa' if passed else 'needs_editorial_review',
+        'checks': checks,
+    }
 
 
 def lesson_answer_markdown(lesson: dict[str, Any]) -> str:
@@ -416,8 +482,23 @@ def lesson_markdown(lesson: dict[str, Any]) -> str:
                 for gate in lesson.get('quality_gates', [])
             ],
             '',
+            '## Quality Review',
+            '',
         ]
     )
+    review = lesson.get('quality_review') or {}
+    lines.extend(
+        [
+            f'- Standard: {review.get("standard", "not recorded")}',
+            f'- Grade: {review.get("grade", "not recorded")}',
+            f'- Passed: {review.get("passed", False)}',
+            '',
+        ]
+    )
+    for check in review.get('checks') or []:
+        lines.append(
+            f'- {check.get("name")}: {check.get("passed")} Evidence: {check.get("evidence")}'
+        )
     return '\n'.join(lines).rstrip() + '\n'
 
 
@@ -441,6 +522,7 @@ def public_lesson_payload(lesson: dict[str, Any], *, include_scene_code: bool = 
             'teaching_spec': lesson.get('teaching_spec'),
             'research_basis': lesson.get('research_basis'),
             'quality_gates': lesson.get('quality_gates'),
+            'quality_review': lesson.get('quality_review'),
             'lesson_markdown': lesson.get('lesson_markdown'),
             'answer_markdown': lesson.get('answer_markdown'),
             'subtitles': lesson.get('subtitles'),
@@ -495,6 +577,10 @@ def assumed_gap(domain: str) -> str:
         'calculus': 'The learner may know the formula but not the changing quantity.',
         'linear_algebra': 'The learner may see arrays of numbers but not transformations.',
         'complex_analysis': 'The learner may treat complex exponentials as symbolic tricks.',
+        'special_functions': (
+            'The learner may see a named function as a black-box formula instead of a '
+            'solution to a concrete interpolation problem.'
+        ),
         'general': 'The learner may not yet know the object, operation, and invariant.',
     }
     return gaps.get(domain, gaps['general'])
@@ -502,6 +588,11 @@ def assumed_gap(domain: str) -> str:
 
 def visual_metaphor(concept: str, domain: str) -> str:
     lowered = concept.lower()
+    if 'gamma' in lowered:
+        return (
+            'Factorial dots become a continuous area machine: one curve through the '
+            'integer islands, locked by the step rule Gamma(x+1)=x Gamma(x).'
+        )
     if 'derivative' in lowered:
         return 'A secant line turning into a local speedometer for a curve.'
     if 'limit' in lowered:
@@ -516,6 +607,7 @@ def visual_metaphor(concept: str, domain: str) -> str:
         'linear_algebra': 'A transformation made visible by watching objects move together.',
         'calculus': 'A changing quantity slowed down until the local rule becomes visible.',
         'complex_analysis': 'Motion in the plane tracked by coordinates and angle.',
+        'special_functions': 'A discrete recipe extended by a visual rule that still passes every checkpoint.',
     }
     return domain_metaphors.get(domain, 'A named object, a visible action, and a stable takeaway.')
 
@@ -581,6 +673,15 @@ def clip_director_note(domain: str, concept: str, clip: StoryboardClip) -> dict[
 
 def visual_primitives(domain: str, concept: str, clip: StoryboardClip) -> list[str]:
     lowered = concept.lower()
+    if 'gamma' in lowered:
+        return [
+            'factorial dots',
+            'smooth gamma curve',
+            'recurrence ladder',
+            'Euler integral area',
+            'integer checkpoints',
+            'arbitrary-curve contrast',
+        ]
     if 'derivative' in lowered:
         return ['axes', 'curve', 'two points', 'secant line', 'tangent line', 'slope label']
     if 'matrix' in lowered:
@@ -607,6 +708,8 @@ def animation_actions(clip: StoryboardClip) -> list[str]:
 
 def asset_needs(domain: str, concept: str) -> list[str]:
     lowered = concept.lower()
+    if 'gamma' in lowered:
+        return ['optional historical portrait/timeline card for a later Euler discovery segment']
     if 'fourier' in lowered:
         return ['optional waveform audio/image reference for future richer renders']
     if domain == 'general':

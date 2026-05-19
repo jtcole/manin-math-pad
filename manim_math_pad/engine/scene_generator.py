@@ -367,6 +367,16 @@ class FourierSeriesSquare(Scene):
 # ─── Concept → domain mapping ────────────────────────────────────────────────
 
 CONCEPT_DOMAINS: dict[str, list[str]] = {
+    'special_functions': [
+        'gamma function',
+        'gamma',
+        'factorial interpolation',
+        'factorial',
+        'euler integral',
+        'beta function',
+        'digamma',
+        'special function',
+    ],
     'calculus': [
         'derivative',
         'integral',

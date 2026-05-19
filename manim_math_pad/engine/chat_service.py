@@ -34,6 +34,12 @@ class MathChatService:
     """Answer math prompts using cached explanations with LLM fallback."""
 
     CONCEPT_ALIASES: tuple[tuple[str, str], ...] = (
+        ('gamma function', 'gamma function'),
+        ('factorial interpolation', 'gamma function'),
+        ('non-integer factorial', 'gamma function'),
+        ('noninteger factorial', 'gamma function'),
+        ('euler integral', 'gamma function'),
+        ('gamma', 'gamma function'),
         ('euler', 'euler identity'),
         ('fourier', 'fourier series'),
         ('matrix multiplication', 'matrix multiplication'),
@@ -255,6 +261,40 @@ class MathChatService:
                     'increase the number of slices',
                     'show the rectangles converging to the region',
                     'label the accumulated total',
+                ),
+            )
+        ),
+        'gamma': (
+            ConceptAnswerProfile(
+                essence=(
+                    'The gamma function is Euler\'s extension of factorials beyond whole '
+                    'numbers: it keeps the factorial step rule while making the missing '
+                    'between-integer values meaningful.'
+                ),
+                mental_model=(
+                    'Imagine factorials as isolated dots at n=0,1,2,3,4. The gamma function '
+                    'asks for a curve through those dots where stepping one unit to the right '
+                    'multiplies the height by the current input.'
+                ),
+                formal_view=(
+                    'For positive inputs, Gamma(x)=integral_0^infinity t^(x-1)e^(-t) dt. '
+                    'It satisfies Gamma(x+1)=x Gamma(x), so Gamma(n+1)=n! at whole numbers.'
+                ),
+                example=(
+                    'Gamma(5)=4!=24. More surprisingly, Gamma(1/2)=sqrt(pi), so the same '
+                    'area machine gives a precise value halfway between the integer steps.'
+                ),
+                misconception=(
+                    'The gamma function is not merely any smooth curve through factorial dots. '
+                    'Matching the dots is cheap; the recurrence and regularity conditions are '
+                    'what make the extension mathematically useful.'
+                ),
+                animation_steps=(
+                    'plot the factorial dots as isolated islands',
+                    'show the recurrence Gamma(x+1)=x Gamma(x) as a ladder rule',
+                    'reveal Euler\'s integral as an area machine under exponential decay',
+                    'check the integer values against factorials',
+                    'contrast the useful extension with arbitrary curves through the same dots',
                 ),
             )
         ),

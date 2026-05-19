@@ -51,8 +51,35 @@ def test_plan_lesson_writes_artifact_folder(tmp_path, capsys):
     assert lesson['teaching_spec']['clip_director_notes'][0]['visual_primitives']
     assert lesson['teaching_spec']['zettel_targets'][0]['type'] == 'central'
     assert lesson['quality_gates'][0]['name'] == 'visual_first'
+    assert lesson['quality_review']['passed'] is True
     assert lesson['research_basis']
     assert lesson['subtitles'][0]['start_seconds'] == 0
+
+
+def test_plan_lesson_canonicalizes_gamma_prompt(tmp_path, capsys):
+    out_dir = tmp_path / 'gamma'
+
+    exit_code = main(
+        [
+            'plan-lesson',
+            '--concept',
+            'how was the gamma function discovered what problem did it solve',
+            '--out',
+            str(out_dir),
+            '--lesson-id',
+            'lesson-gamma',
+        ]
+    )
+
+    assert exit_code == 0
+    capsys.readouterr()
+    lesson = json.loads((out_dir / 'lesson.json').read_text(encoding='utf-8'))
+    assert lesson['concept'] == 'gamma function'
+    assert lesson['domain'] == 'special_functions'
+    assert lesson['quality_review']['passed'] is True
+    assert 'factorial' in lesson['answer_markdown'].lower()
+    assert 'area machine' in lesson['teaching_spec']['visual_metaphor']
+    assert 'matching dots is not uniqueness' in lesson['beats'][-1]['math_focus']
 
 
 def test_plan_lesson_accepts_conversation_json(tmp_path, capsys):

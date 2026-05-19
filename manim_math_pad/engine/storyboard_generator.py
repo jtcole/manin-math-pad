@@ -196,6 +196,34 @@ class StoryboardGenerator:
 
     def _lesson_for(self, concept: str, domain: str) -> LessonPlan:
         lowered = concept.lower()
+        if 'gamma' in lowered:
+            return LessonPlan(
+                concept=concept,
+                audience_level='curious calculus learner',
+                learning_goal=(
+                    'Understand the gamma function as the visual answer to the question: '
+                    'what should factorial mean between the whole numbers?'
+                ),
+                prerequisites=(
+                    'factorials',
+                    'area under a curve',
+                    'exponential decay',
+                    'function recurrence',
+                ),
+                misconception=(
+                    'The gamma function is not just a pretty curve through factorial dots; '
+                    'matching the dots is easy, but the recurrence and shape constraints do '
+                    'the real mathematical work.'
+                ),
+                example=(
+                    'Gamma(5)=4!=24, while Gamma(1/2)=sqrt(pi), so Euler\'s integral turns '
+                    'between-integer factorials into measurable areas.'
+                ),
+                takeaway=(
+                    'Gamma turns factorial from a discrete recipe into a continuous machine '
+                    'governed by the one-step rule Gamma(x+1)=x Gamma(x).'
+                ),
+            )
         if 'derivative' in lowered:
             return LessonPlan(
                 concept=concept,
@@ -259,6 +287,59 @@ class StoryboardGenerator:
 
     def _planned_beats(self, concept: str, lesson: LessonPlan) -> list[StoryboardBeat]:
         lowered = concept.lower()
+        if 'gamma' in lowered:
+            return [
+                StoryboardBeat(
+                    1,
+                    'Start With Factorial Islands',
+                    22,
+                    'Turn the historical problem into a visible gap between integer dots.',
+                    'Plot 0!, 1!, 2!, 3!, and 4! as isolated dots, then ask what the curve should do between them.',
+                    'factorial values are known only at whole numbers',
+                    'Euler starts with a simple itch: factorials leap from dot to dot, but analysis wants values between the dots.',
+                    'Which values are known before any curve is drawn?',
+                ),
+                StoryboardBeat(
+                    2,
+                    'Demand The Step Rule',
+                    22,
+                    'Show why any candidate must preserve the factorial recurrence.',
+                    'Draw the gamma curve through the dots and add ladder arrows for Gamma(x+1)=x Gamma(x).',
+                    'Gamma(x+1)=x Gamma(x)',
+                    'A useful extension has to remember the factorial engine: move one step right, multiply by the current input.',
+                    'What rule survives after we leave the integers?',
+                ),
+                StoryboardBeat(
+                    3,
+                    'Reveal Euler\'s Area Machine',
+                    24,
+                    'Replace curve guessing with a concrete integral that produces the values.',
+                    'Morph to an area under t^(x-1)e^(-t) and keep the integral beside the shaded region.',
+                    'Gamma(x)=integral_0^infinity t^(x-1)e^(-t) dt',
+                    'Euler\'s move is not to draw a convenient curve by hand; it is to build an area machine whose output changes smoothly with x.',
+                    'What object is being measured when x is not an integer?',
+                ),
+                StoryboardBeat(
+                    4,
+                    'Check The Integer Stops',
+                    22,
+                    'Prove the new machine still agrees with factorial where factorial already exists.',
+                    'Show Gamma(1), Gamma(2), Gamma(3), and Gamma(5) as checkpoints on the same curve.',
+                    'Gamma(n+1)=n!',
+                    'At the integer stops, the area machine snaps back to the familiar factorial numbers.',
+                    'Which gamma input corresponds to 4!?',
+                ),
+                StoryboardBeat(
+                    5,
+                    'Name The New Terrain',
+                    20,
+                    'Contrast useful extension with arbitrary interpolation and point to what gamma unlocks.',
+                    'Show a second curve through the same dots, reject it, then keep the recurrence, area, and shape constraints highlighted.',
+                    'matching dots is not uniqueness',
+                    'The new problem is subtle: many curves can touch the same dots, so gamma becomes important because its rules travel into probability, asymptotics, and the complex plane.',
+                    'Why is matching all the factorial dots not enough?',
+                ),
+            ]
         if 'derivative' in lowered:
             return [
                 StoryboardBeat(
@@ -600,6 +681,121 @@ class {scene_name}(Scene):
 
     def _visual_code(self, domain: str, concept: str, beat: StoryboardBeat) -> str:
         lowered = concept.lower()
+        if 'gamma' in lowered:
+            return '''        factorial_axes = Axes(
+            x_range=[-0.2, 4.4, 1],
+            y_range=[0, 26, 5],
+            x_length=7.4,
+            y_length=4.15,
+            tips=False,
+        )
+        factorial_axes.shift(LEFT * 0.75 + DOWN * 0.1)
+        axis_labels = VGroup(
+            Text("input", font_size=18, color=GREY_B).next_to(factorial_axes.x_axis, RIGHT, buff=0.12),
+            Text("factorial value", font_size=18, color=GREY_B)
+            .next_to(factorial_axes.y_axis, UP, buff=0.12),
+        )
+        factorial_dots = VGroup(
+            *[
+                Dot(
+                    factorial_axes.c2p(n, math.factorial(n)),
+                    radius=0.07,
+                    color=YELLOW,
+                )
+                for n in range(5)
+            ]
+        )
+        factorial_labels = VGroup(
+            *[
+                MathTex(label, font_size=24, color=YELLOW).next_to(
+                    factorial_dots[index],
+                    UR,
+                    buff=0.08,
+                )
+                for index, label in enumerate([r"0!=1", r"1!=1", r"2!=2", r"3!=6", r"4!=24"])
+            ]
+        )
+        gamma_curve = factorial_axes.plot(
+            lambda x: math.gamma(x + 1),
+            x_range=[0, 4.0],
+            color=BLUE,
+        )
+        alternative_curve = factorial_axes.plot(
+            lambda x: math.gamma(x + 1) * (1 + 0.09 * math.sin(2 * PI * x)),
+            x_range=[0, 4.0],
+            color=RED,
+        )
+        alternative_curve.set_stroke(opacity=0.55)
+        question = Text(
+            "Fill in the factorial gaps",
+            font_size=28,
+            color=YELLOW,
+        ).to_edge(DOWN, buff=0.42)
+        recurrence = MathTex(r"\\Gamma(x+1)=x\\Gamma(x)", font_size=38, color=YELLOW)
+        recurrence.to_edge(DOWN, buff=0.42)
+        ladder_arrows = VGroup(
+            *[
+                Arrow(
+                    factorial_axes.c2p(x, math.gamma(x + 1)),
+                    factorial_axes.c2p(x + 1, math.gamma(x + 2)),
+                    buff=0.05,
+                    color=YELLOW,
+                    stroke_width=4,
+                    max_tip_length_to_length_ratio=0.12,
+                )
+                for x in [0.45, 1.15, 1.85]
+            ]
+        )
+        integral_axes = Axes(
+            x_range=[0, 8, 2],
+            y_range=[0, 0.62, 0.2],
+            x_length=6.7,
+            y_length=3.45,
+            tips=False,
+        )
+        integral_axes.shift(DOWN * 0.05)
+        integrand = integral_axes.plot(
+            lambda t: (t ** 2) * math.exp(-t),
+            x_range=[0, 8],
+            color=BLUE,
+        )
+        area = integral_axes.get_area(
+            integrand,
+            x_range=[0, 8],
+            color=BLUE,
+            opacity=0.32,
+        )
+        integral_formula = MathTex(
+            r"\\Gamma(x)=\\int_0^\\infty t^{x-1}e^{-t}\\,dt",
+            font_size=35,
+            color=YELLOW,
+        )
+        integral_formula.next_to(integral_axes, DOWN, buff=0.34)
+        area_label = Text("area changes as x changes", font_size=24, color=YELLOW)
+        area_label.next_to(integral_axes, UP, buff=0.18)
+        check_equations = VGroup(
+            MathTex(r"\\Gamma(1)=1", font_size=31, color=YELLOW),
+            MathTex(r"\\Gamma(2)=1", font_size=31, color=YELLOW),
+            MathTex(r"\\Gamma(3)=2", font_size=31, color=YELLOW),
+            MathTex(r"\\Gamma(5)=24=4!", font_size=31, color=YELLOW),
+            MathTex(r"\\Gamma(1/2)=\\sqrt{\\pi}", font_size=31, color=BLUE),
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.14)
+        check_equations.to_edge(RIGHT, buff=0.55)
+        criteria = VGroup(
+            Text("match factorial dots", font_size=20, color=YELLOW),
+            Text("obey the step rule", font_size=20, color=YELLOW),
+            Text("avoid arbitrary wiggles", font_size=20, color=YELLOW),
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.18)
+        criteria.to_edge(RIGHT, buff=0.26).shift(UP * 0.82)
+        unlocks = VGroup(
+            Text("probability", font_size=20, color=BLUE),
+            Text("asymptotics", font_size=20, color=BLUE),
+            Text("complex analysis", font_size=20, color=BLUE),
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.12)
+        unlocks.next_to(criteria, DOWN, buff=0.42)
+        visual = VGroup(factorial_axes, gamma_curve, factorial_dots)
+        visual.move_to(ORIGIN)
+'''
         if 'fourier' in lowered:
             return '''        axes = Axes(
             x_range=[-PI, PI, PI / 2],
@@ -731,6 +927,45 @@ class {scene_name}(Scene):
 
     def _visual_action_code(self, domain: str, concept: str, beat: StoryboardBeat) -> str:
         lowered = concept.lower()
+        if 'gamma' in lowered:
+            if beat.index == 1:
+                return '''        self.play(Create(factorial_axes), FadeIn(axis_labels), run_time=1.5)
+        self.play(LaggedStart(*[FadeIn(dot) for dot in factorial_dots], lag_ratio=0.18), run_time=1.5)
+        self.play(LaggedStart(*[Write(label) for label in factorial_labels], lag_ratio=0.12), run_time=1.8)
+        self.play(Write(question), run_time=1.5)
+'''
+            if beat.index == 2:
+                return '''        self.play(Create(factorial_axes), FadeIn(axis_labels), run_time=1.0)
+        self.play(FadeIn(factorial_dots), FadeIn(factorial_labels), run_time=1.0)
+        self.play(Create(gamma_curve), run_time=2.6)
+        self.play(Write(recurrence), run_time=1.2)
+        self.play(LaggedStart(*[GrowArrow(arrow) for arrow in ladder_arrows], lag_ratio=0.18), run_time=2.0)
+        self.play(Circumscribe(recurrence), run_time=1.1)
+'''
+            if beat.index == 3:
+                return '''        self.play(Create(integral_axes), run_time=1.2)
+        self.play(Create(integrand), run_time=1.6)
+        self.play(FadeIn(area), run_time=1.2)
+        self.play(Write(integral_formula), FadeIn(area_label), run_time=1.8)
+        self.play(Indicate(area, color=YELLOW), run_time=1.4)
+'''
+            if beat.index == 4:
+                return '''        self.play(Create(factorial_axes), FadeIn(axis_labels), run_time=1.0)
+        self.play(FadeIn(factorial_dots), Create(gamma_curve), run_time=1.7)
+        self.play(Write(check_equations), run_time=2.6)
+        self.play(LaggedStart(*[Indicate(dot, color=YELLOW) for dot in factorial_dots], lag_ratio=0.18), run_time=2.2)
+'''
+            if beat.index == 5:
+                return '''        self.play(Create(factorial_axes), FadeIn(axis_labels[1]), run_time=0.9)
+        self.play(FadeIn(factorial_dots), Create(gamma_curve), run_time=1.4)
+        self.play(Create(alternative_curve), run_time=1.6)
+        self.play(FadeIn(criteria), run_time=1.8)
+        self.play(Indicate(alternative_curve, color=RED), Indicate(criteria[2], color=YELLOW), run_time=1.6)
+        self.play(FadeIn(unlocks), run_time=1.3)
+'''
+            return '''        self.play(Create(factorial_axes), FadeIn(axis_labels), run_time=1.0)
+        self.play(FadeIn(factorial_dots), Create(gamma_curve), Write(recurrence), run_time=2.4)
+'''
         if 'fourier' in lowered:
             return '''        self.play(Create(axes), run_time=1.4)
         self.play(Create(target), run_time=1.4)

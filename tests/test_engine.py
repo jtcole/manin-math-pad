@@ -44,6 +44,17 @@ class TestMathChatService:
         assert 'For animation, I would break it into steps:' in turn.answer
         assert 'introduce the object' in turn.answer
 
+    def test_gamma_prompt_gets_specific_profile(self):
+        turn = MathChatService(enable_llm_chat=False).respond(
+            'How was the gamma function discovered and what problem did it solve?'
+        )
+
+        assert turn.concept == 'gamma function'
+        assert turn.domain == 'special_functions'
+        assert 'factorial' in turn.answer.lower()
+        assert 'Euler' in turn.answer or 'euler' in turn.answer
+        assert 'arbitrary' in turn.answer.lower()
+
 
 class TestSceneGenerator:
     """Test the Manim scene generator."""
@@ -251,6 +262,26 @@ class TestStoryboardGenerator:
             assert LLMSceneGenerator.extract_scene_name(clip.scene_code) == clip.scene_name
             compile(clip.scene_code, f'<storyboard:{index}>', 'exec')
 
+    def test_gamma_storyboard_is_specific_and_renderable(self):
+        storyboard = StoryboardGenerator().generate(
+            'how was the gamma function discovered what problem did it solve what new problems did it'
+        )
+
+        assert storyboard.concept == 'gamma function'
+        assert storyboard.domain == 'special_functions'
+        assert 'factorial' in storyboard.lesson_plan.learning_goal.lower()
+        assert 'Gamma(x+1)=x Gamma(x)' in storyboard.lesson_plan.takeaway
+        assert len(storyboard.clips) == 5
+        assert storyboard.target_duration_seconds >= 100
+        assert 'Euler' in storyboard.beats[2].narration
+        assert 'matching dots is not uniqueness' in storyboard.beats[-1].math_focus
+        for index, clip in enumerate(storyboard.clips, start=1):
+            assert clip.index == index
+            assert 'factorial_axes' in clip.scene_code
+            assert 'integral_axes' in clip.scene_code
+            assert 'Learner check' not in clip.scene_code
+            compile(clip.scene_code, f'<gamma-storyboard:{index}>', 'exec')
+
 
 class TestZettelGenerator:
     """Test the Obsidian zettel cluster generator."""
@@ -287,6 +318,9 @@ class TestZettelGenerator:
 
         cluster = self.gen.generate('prime numbers')
         assert cluster.domain == 'number_theory'
+
+        cluster = self.gen.generate('gamma function')
+        assert cluster.domain == 'special_functions'
 
     def test_context_connections(self):
         ctx = {'previous_concepts': ['derivatives', 'limits']}
@@ -326,6 +360,16 @@ class TestZettelGenerator:
         assert 'limiting tangent slope' in cluster.central_note.content
         assert '## Beat Sheet' in joined
         assert '## Questions To Resolve' in joined
+
+    def test_gamma_notes_preserve_factorial_story(self):
+        cluster = self.gen.generate('gamma function')
+        joined = '\n'.join(note.content for note in cluster.notes)
+
+        assert cluster.domain == 'special_functions'
+        assert 'factorial dots' in joined.lower()
+        assert 'Gamma(x+1)=x Gamma(x)' in joined
+        assert 'Euler' in joined
+        assert 'arbitrary curve' in joined.lower()
 
 
 class TestManimRenderer:
